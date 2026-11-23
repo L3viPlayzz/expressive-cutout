@@ -69,7 +69,7 @@ import kotlinx.coroutines.selects.select
 import kotlin.math.roundToInt
 
 /** The pink tile accent, used as the play/pause default and the preview backdrop's default fill. */
-private val MUSIC_ACCENT = Color(0xFFF472B6)
+private val MUSIC_ACCENT = Color(0xFF73B9FF)
 
 /** Fallback fill for a button asked to be [MusicButtonStyle.filled] before the user picks a colour. */
 private val MUSIC_BUTTON_FILLED_DEFAULT = Color(0xFFE0E0E0)
@@ -99,6 +99,22 @@ internal fun MusicTileScreen(
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         PageTitle(text = stringResource(R.string.tile_music))
+
+        Text(
+            text = "XTREME HYBRID  •  NOW PLAYING",
+            color = Color(0xFF73B9FF),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 18.dp, top = 4.dp),
+        )
+        Text(
+            text = "Play music in Spotify or YouTube Music to show the island. " +
+                "Enable the Music tile and grant Notification Access; expand the island " +
+                "for album art, playback controls and the live progress bar.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 13.sp,
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 5.dp),
+        )
 
         // Tiny player toggle
         SettingsToggleCard(
