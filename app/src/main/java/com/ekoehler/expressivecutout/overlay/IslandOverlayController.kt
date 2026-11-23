@@ -40,6 +40,8 @@ import com.ekoehler.expressivecutout.core.CutoutMetrics
 import com.ekoehler.expressivecutout.core.CutoutSignal
 import com.ekoehler.expressivecutout.core.CutoutKind
 import com.ekoehler.expressivecutout.core.CutoutWidthBus
+import com.ekoehler.expressivecutout.core.DeviceLockBus
+import com.ekoehler.expressivecutout.core.NotificationInboxBus
 import com.ekoehler.expressivecutout.core.DynamicTile
 import com.ekoehler.expressivecutout.core.IslandEventBus
 import com.ekoehler.expressivecutout.core.IslandPreviewBus
@@ -294,6 +296,7 @@ class IslandOverlayController(private val context: Context) {
     private var previewPinned = false
     private var previewExpanded = false
     private var expanded = false
+    private var inboxShowing = false
     /**
      * True while a media session is actively playing; keeps the music cutout pinned up (no
      * auto-dismiss) for as long as playback lasts.
@@ -718,6 +721,8 @@ class IslandOverlayController(private val context: Context) {
                 val cameraRightDp by cameraRightEdgeDp.collectAsStateWithLifecycle()
                 val emptyInfo by emptyInfoState.collectAsStateWithLifecycle()
                 val unreadCounts by CutoutNotificationListenerService.unreadCounts.collectAsStateWithLifecycle()
+                val inboxItems by NotificationInboxBus.items.collectAsStateWithLifecycle()
+                val isLocked by DeviceLockBus.locked.collectAsStateWithLifecycle()
                 val hotspot by HotspotClients.state.collectAsStateWithLifecycle()
                 val shizukuStatus by ShizukuState.status.collectAsStateWithLifecycle()
                 val battery by BatteryBus.status.collectAsStateWithLifecycle()
@@ -777,11 +782,16 @@ class IslandOverlayController(private val context: Context) {
                         hiddenEmptyWidthPercent = behaviour.hiddenEmptyWidthPercent,
                         emptyInfo = emptyInfo,
                         unreadCounts = unreadCounts,
+                        inboxItems = inboxItems,
+                        inboxLocked = isLocked || keyguardManager?.isKeyguardLocked == true,
+                        onInboxChanged = ::onInboxChanged,
+                        onInboxOpenNotification = ::onInboxOpenNotification,
                         hotspot = hotspot,
                         canTurnOffHotspot = shizukuStatus == ShizukuStatus.READY,
                         onTurnOffHotspot = ::onTurnOffHotspot,
                         battery = battery,
                         emptyOpensCenter = behaviour.showsWhenEmptyClickAction == EmptyClickAction.OPEN_CENTER,
+                        emptyOpensInbox = behaviour.showsWhenEmptyClickAction == EmptyClickAction.OPEN_INBOX,
                         centerShortcuts = behaviour.centerShortcuts,
                         centerShowLabels = behaviour.centerShowLabels,
                         centerFillContainers = behaviour.centerFillContainers,
@@ -1074,6 +1084,11 @@ class IslandOverlayController(private val context: Context) {
             emptyPillInfoPreferences.settings.collect {
                 emptyInfoState.value = it
                 syncWindowSize()
+            }
+        }
+        scope.launch {
+            NotificationInboxBus.items.collect {
+                if (inboxShowing) syncWindowSize()
             }
         }
         scope.launch {
@@ -2166,6 +2181,15 @@ class IslandOverlayController(private val context: Context) {
         val event = currentEvent.value
         val topMarginExtra = maxOf(0, layoutState.value.expanded.topMarginDp - IslandDimensions.DEFAULT_TOP_MARGIN_DP)
         return when {
+            expanded && inboxShowing -> inboxHeightDp(
+                baseHeightDp = layoutState.value.expanded.heightDp,
+                topMarginDp = maxOf(
+                    layoutState.value.expanded.topMarginDp,
+                    layoutState.value.collapsed.heightDp + 12,
+                ),
+                entries = NotificationInboxBus.items.value.size,
+                screenHeightDp = displayHeightDp,
+            ) - layoutState.value.expanded.heightDp
             // The expanded connected call stacks its own two button rows under the caller row.
             expanded && event?.call != null ->
                 callExpandedExtraDp(event.call.showActions && event.actions.isNotEmpty())
@@ -2510,6 +2534,20 @@ class IslandOverlayController(private val context: Context) {
                 syncWindowSize()
             }
         }
+    }
+
+    /** Keeps the fixed overlay window large enough while the inbox is expanded. */
+    private fun onInboxChanged(open: Boolean) {
+        if (inboxShowing == open) return
+        inboxShowing = open
+        if (!open && currentEvent.value == null) expanded = false
+        syncWindowSize()
+    }
+
+    /** Opens a selected notification only after the device has been unlocked. */
+    private fun onInboxOpenNotification(key: String) {
+        if (keyguardManager?.isKeyguardLocked == true) return
+        CutoutNotificationListenerService.openFromInbox(key)
     }
 
     /** Pause auto-dismiss while expanded; on collapse either hide or return to the normal cutout. */

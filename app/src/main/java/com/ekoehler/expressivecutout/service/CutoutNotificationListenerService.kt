@@ -21,7 +21,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import com.ekoehler.expressivecutout.core.CutoutSignal
+import com.ekoehler.expressivecutout.core.InboxNotification
 import com.ekoehler.expressivecutout.core.IslandEventBus
+import com.ekoehler.expressivecutout.core.NotificationInboxBus
 import com.ekoehler.expressivecutout.core.MediaArt
 import com.ekoehler.expressivecutout.core.MediaArtBus
 import com.ekoehler.expressivecutout.core.MediaLike
@@ -215,6 +217,7 @@ class CutoutNotificationListenerService : NotificationListenerService() {
         if (instance === this) instance = null
         _bound.value = false
         _unreadCounts.value = UnreadCounts()
+        NotificationInboxBus.update(emptyList())
     }
 
     /**
@@ -225,6 +228,7 @@ class CutoutNotificationListenerService : NotificationListenerService() {
         if (instance === this) instance = null
         _bound.value = false
         _unreadCounts.value = UnreadCounts()
+        NotificationInboxBus.update(emptyList())
         // Drop the effects mute by hand before the job that would have done it dies with the scope:
         // a fetch-back caught mid-flight by a teardown must not leave the device silent.
         if (mutedReturns > 0) setEffectsMuted(false)
@@ -717,6 +721,18 @@ class CutoutNotificationListenerService : NotificationListenerService() {
             all = surfaced.size,
             nonSilent = surfaced.count { !isSilentNotification(it, rankingMap) },
         )
+        NotificationInboxBus.update(
+            surfaced.sortedByDescending { it.postTime }.take(MAX_INBOX_ENTRIES).map { sbn ->
+                InboxNotification(
+                    key = sbn.key,
+                    packageName = sbn.packageName,
+                    appName = NotificationHeaderResolver.resolveAppName(this, sbn.packageName) ?: sbn.packageName,
+                    title = sbn.notification.extras?.getCharSequence(Notification.EXTRA_TITLE)
+                        ?.toString()?.takeIf { it.isNotBlank() }.orEmpty(),
+                    postTimeMs = sbn.postTime,
+                )
+            },
+        )
     }
 
     /**
@@ -1022,6 +1038,9 @@ class CutoutNotificationListenerService : NotificationListenerService() {
          */
         private const val MAX_TRACKED_KEYS = 64
 
+        /** The inbox avoids unbounded snapshots; Android still owns the full notification list. */
+        private const val MAX_INBOX_ENTRIES = 40
+
         /**
          * How long a notification's content stays suppressed after the island finishes with it, so
          * a re-post of the same notification doesn't pop again and flip-flop with what replaced it.
@@ -1085,6 +1104,23 @@ class CutoutNotificationListenerService : NotificationListenerService() {
          */
         fun dismiss(key: String) {
             instance?.run { markSuppressed(key); discard(key, onlyIfHeld = false) }
+        }
+
+        /** Opens a notification explicitly selected in the inbox without reading its message body. */
+        fun openFromInbox(key: String) {
+            val listener = instance ?: return
+            val item = runCatching { listener.getActiveNotifications(arrayOf(key)).firstOrNull() }
+                .onFailure { Log.w(TAG, "Cannot find inbox notification", it) }
+                .getOrNull() ?: return
+            val intent = item.notification.contentIntent ?: return
+            runCatching { intent.send() }
+                .onSuccess {
+                    if (item.notification.flags and Notification.FLAG_AUTO_CANCEL != 0) {
+                        runCatching { listener.cancelNotification(key) }
+                            .onFailure { Log.w(TAG, "Cannot auto-clear opened notification", it) }
+                    }
+                }
+                .onFailure { Log.w(TAG, "Cannot open inbox notification", it) }
         }
 
         /**

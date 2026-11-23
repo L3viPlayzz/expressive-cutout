@@ -51,6 +51,9 @@ import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -176,6 +179,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.ekoehler.expressivecutout.R
+import com.ekoehler.expressivecutout.core.InboxNotification
 import com.ekoehler.expressivecutout.core.CallAudioBus
 import com.ekoehler.expressivecutout.core.MediaArtBus
 import com.ekoehler.expressivecutout.core.MediaLike
@@ -244,6 +248,118 @@ private val PILL_TEXT_COLOR_DARK = Color(0xFF0A0A0A)
 
 /** Fallback fill for a button asked to be [MusicButtonStyle.filled] before the user picks a colour. */
 private val MUSIC_BUTTON_FILLED_DEFAULT = Color(0xFFE0E0E0)
+
+/**
+ * Shows the user's active notifications within the expanded island, below the selfie camera.
+ * Nothing in this view persists notification contents or reads message bodies.
+ */
+@Composable
+private fun InboxContent(
+    notifications: List<InboxNotification>,
+    selectedIndex: Int,
+    cameraClearanceDp: Int,
+    onSelect: (InboxNotification) -> Unit,
+    onClose: () -> Unit,
+) {
+    val ink = LocalContentColor.current
+    val listState = rememberLazyListState()
+    LaunchedEffect(selectedIndex, notifications.size) {
+        if (notifications.isNotEmpty()) listState.animateScrollToItem(selectedIndex.coerceIn(0, notifications.lastIndex))
+    }
+    Column(
+        modifier = Modifier.fillMaxSize().padding(start = 14.dp, end = 14.dp, top = cameraClearanceDp.dp, bottom = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = stringResource(R.string.xtreme_inbox_title),
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 15.sp,
+                color = ink,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = notifications.size.toString(),
+                fontSize = 12.sp,
+                color = ink.copy(alpha = 0.6f),
+                modifier = Modifier.padding(end = 8.dp),
+            )
+            Icon(
+                imageVector = Icons.Rounded.Close,
+                contentDescription = stringResource(R.string.gesture_action_shrink),
+                tint = ink,
+                modifier = Modifier.size(22.dp).clickable(onClick = onClose),
+            )
+        }
+        if (notifications.isEmpty()) {
+            Text(
+                text = stringResource(R.string.xtreme_inbox_empty),
+                color = ink.copy(alpha = 0.7f),
+                fontSize = 12.sp,
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                itemsIndexed(notifications, key = { _, item -> item.key }) { index, item ->
+                    val appIcon = rememberAppIcon(item.packageName, themed = false)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(ink.copy(alpha = if (index == selectedIndex) 0.17f else 0.07f))
+                            .clickable { onSelect(item) }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        if (appIcon != null) {
+                            Image(
+                                bitmap = appIcon.bitmap,
+                                contentDescription = null,
+                                modifier = Modifier.size(30.dp),
+                                contentScale = ContentScale.Fit,
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier.size(30.dp).clip(CircleShape)
+                                    .background(ink.copy(alpha = 0.14f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(item.appName.take(1).uppercase(), color = ink, fontSize = 14.sp)
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = item.appName,
+                                fontWeight = FontWeight.SemiBold,
+                                color = ink,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                fontSize = 12.sp,
+                            )
+                            Text(
+                                text = item.title.ifBlank { item.appName },
+                                color = ink.copy(alpha = 0.75f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                fontSize = 11.sp,
+                            )
+                        }
+                    }
+                }
+            }
+            Text(
+                text = stringResource(R.string.xtreme_inbox_hint),
+                color = ink.copy(alpha = 0.55f),
+                fontSize = 10.sp,
+                maxLines = 1,
+            )
+        }
+    }
+}
 
 /**
  * The expanded notification's progress bar: its thickness, and the gap holding it off the text
@@ -540,11 +656,16 @@ fun DynamicIsland(
     hiddenEmptyWidthPercent: Int = BehaviourSettings.DEFAULT_HIDDEN_EMPTY_WIDTH_PERCENT,
     emptyInfo: EmptyPillInfoSettings = EmptyPillInfoSettings(),
     unreadCounts: UnreadCounts = UnreadCounts(),
+    inboxItems: List<InboxNotification> = emptyList(),
+    inboxLocked: Boolean = false,
+    onInboxChanged: (Boolean) -> Unit = {},
+    onInboxOpenNotification: (String) -> Unit = {},
     hotspot: HotspotState = HotspotState(),
     canTurnOffHotspot: Boolean = false,
     onTurnOffHotspot: () -> Unit = {},
     battery: BatteryStatus? = null,
     emptyOpensCenter: Boolean = false,
+    emptyOpensInbox: Boolean = false,
     centerShortcuts: List<CenterShortcut> = emptyList(),
     centerShowLabels: Boolean = true,
     centerFillContainers: Boolean = false,
@@ -587,6 +708,11 @@ fun DynamicIsland(
     val tapExpandedState = remember(shownEvent?.id, forcedExpanded) { mutableStateOf(initialExpandedState) }
     var tapExpanded by tapExpandedState
     var centerInteraction by remember { mutableStateOf(0) }
+    var inboxOpen by remember { mutableStateOf(false) }
+    var inboxSelectedIndex by remember { mutableStateOf(0) }
+    LaunchedEffect(event?.id, inboxLocked) {
+        if (inboxLocked || event?.id != null) inboxOpen = false
+    }
     var replyingTo by remember(shownEvent?.id) { mutableStateOf<IslandAction?>(null) }
     val replying = replyingTo != null
     var sentReply by remember(shownEvent?.id) { mutableStateOf<Pair<IslandAction, String>?>(null) }
@@ -599,6 +725,7 @@ fun DynamicIsland(
     val centerExpanded = emptyPill && emptyOpensCenter && tapExpanded
     val isExpanded = when {
         forcedExpanded == false -> false
+        inboxOpen -> true
         emptyPill -> centerExpanded
         isNormalOnly -> false
         else -> forcedExpanded ?: tapExpanded
@@ -622,13 +749,24 @@ fun DynamicIsland(
     }
     val performGesture: (GestureAction) -> Unit = { action ->
         when (action) {
-            GestureAction.EXPAND -> tapExpanded = true
-            GestureAction.SHRINK -> tapExpanded = false
+            GestureAction.EXPAND -> { inboxOpen = false; tapExpanded = true }
+            GestureAction.SHRINK -> { inboxOpen = false; tapExpanded = false }
+            GestureAction.OPEN_INBOX -> if (!inboxLocked) {
+                tapExpanded = false
+                inboxOpen = !inboxOpen
+                inboxSelectedIndex = 0
+            }
+            GestureAction.NEXT_NOTIFICATION, GestureAction.PREVIOUS_NOTIFICATION -> if (!inboxLocked && inboxItems.isNotEmpty()) {
+                val delta = if (action == GestureAction.NEXT_NOTIFICATION) 1 else -1
+                inboxSelectedIndex = (inboxSelectedIndex + delta + inboxItems.size) % inboxItems.size
+                inboxOpen = true
+                tapExpanded = false
+            }
             GestureAction.OPEN_APP -> if (canActivate) {
                 tapExpanded = false
                 onActivate()
             }
-            GestureAction.DISMISS -> dismissIsland()
+            GestureAction.DISMISS -> if (inboxOpen) inboxOpen = false else dismissIsland()
             GestureAction.NONE -> Unit
         }
     }
@@ -656,19 +794,28 @@ fun DynamicIsland(
     }
 
     LaunchedEffect(replying) { onReplyActiveChange(replying) }
-    LaunchedEffect(isExpanded, event != null, emptyPill, emptyOpensCenter) {
-        if (event != null || (emptyPill && emptyOpensCenter)) onExpandedChange(isExpanded)
+    LaunchedEffect(isExpanded, inboxOpen, event != null, emptyPill, emptyOpensCenter) {
+        onInboxChanged(inboxOpen)
+        if (event != null || inboxOpen || (emptyPill && emptyOpensCenter)) onExpandedChange(isExpanded)
     }
 
     LaunchedEffect(collapseTrigger) {
         if (collapseTrigger > 0L && forcedExpanded == null && isExpanded) {
             tapExpanded = false
+            inboxOpen = false
             replyingTo = null
         }
     }
 
     // Collapsing mid-swipe would shrink the island while it is translated aside, leaving a stray
     // half-faded pill on the edge of the screen; the timer restarts once it springs back.
+    LaunchedEffect(inboxOpen, autoCollapse, autoCollapseMs) {
+        if (inboxOpen && autoCollapse) {
+            delay(maxOf(10_000L, autoCollapseMs))
+            inboxOpen = false
+        }
+    }
+
     LaunchedEffect(tapExpanded, forcedExpanded, autoCollapse, autoCollapseMs, replying, confirmingSent, centerInteraction, sliding) {
         if (forcedExpanded == null && tapExpanded && autoCollapse && !replying && !confirmingSent && !sliding) {
             delay(autoCollapseMs)
@@ -754,6 +901,7 @@ fun DynamicIsland(
     }
 
     val dims = when {
+        inboxOpen -> expanded
         emptyPill && !isExpanded -> emptyPillCutout
         isTiny -> collapsed.asTinyCutout(displayWidthDp, cameraRightEdgeDp)
         callTwoRow -> expanded
@@ -830,6 +978,12 @@ fun DynamicIsland(
     }
 
     val heightBonus = when {
+        inboxOpen -> inboxHeightDp(
+            baseHeightDp = dims.heightDp,
+            topMarginDp = maxOf(expanded.topMarginDp, collapsed.heightDp + 12),
+            entries = inboxItems.size,
+            screenHeightDp = screenHeightDp,
+        ) - dims.heightDp
         emptyPill && isExpanded -> {
             if (centerContentHeightDp > 0) {
                 collapsed.heightDp + CENTER_TOP_GAP_DP + centerContentHeightDp - dims.heightDp
@@ -1179,6 +1333,7 @@ fun DynamicIsland(
                 detectTapGestures(
                     onTap = {
                         tapExpanded = false
+                        inboxOpen = false
                         replyingTo = null
                     }
                 )
@@ -1276,7 +1431,7 @@ fun DynamicIsland(
                             // Hidden, not removed: the surface stays laid out so taps on the empty area still land.
                             alpha = shownAlpha * hiddenPillAlpha
                         }
-                        .islandTapGestures(
+                        .then(if (inboxOpen) Modifier else Modifier.islandTapGestures(
                             event = shownEvent,
                             forcedExpanded = forcedExpanded,
                             isExpanded = isExpanded,
@@ -1284,6 +1439,8 @@ fun DynamicIsland(
                             replying = replying,
                             emptyPill = emptyPill,
                             emptyOpensCenter = emptyOpensCenter,
+                            emptyOpensInbox = emptyOpensInbox,
+                            inboxLocked = inboxLocked,
                             pressWidens = pressWidens,
                             vibrateOnTap = vibrateOnTap,
                             scope = scope,
@@ -1297,14 +1454,14 @@ fun DynamicIsland(
                             perform = performGesture,
                             onEmptyClick = onEmptyClick,
                             onActivate = onActivate,
-                        )
+                        ))
                         .islandVerticalSwipe(
                             event = shownEvent,
                             forcedExpanded = forcedExpanded,
                             replying = replying,
                             emptyPill = emptyPill,
-                            upAction = if (isExpanded) expandedSwipeUp else normalSwipeUp,
-                            downAction = if (isExpanded) expandedSwipeDown else GestureAction.NONE,
+                            upAction = if (inboxOpen) GestureAction.NONE else if (isExpanded) expandedSwipeUp else normalSwipeUp,
+                            downAction = if (inboxOpen) GestureAction.NONE else if (isExpanded) expandedSwipeDown else GestureAction.NONE,
                             perform = performGesture,
                             isExpanded = isExpanded,
                             pullStretch = pullStretch,
@@ -1321,6 +1478,8 @@ fun DynamicIsland(
                             scope = scope,
                             dismissOffsetX = dismissOffsetX,
                             onDismiss = dismissIsland,
+                            onNavigate = performGesture,
+                            navRevision = inboxSelectedIndex + inboxItems.size * 1000 + if (inboxLocked) 100_000 else 0,
                         ),
                     shape = islandShape,
                     appearance = appearance,
@@ -1341,7 +1500,18 @@ fun DynamicIsland(
                         animationSpec = tween(scaled(150)),
                         label = "islandContent"
                     ) { content ->
-                        if (content.emptyPill) {
+                        if (inboxOpen) {
+                            InboxContent(
+                                notifications = inboxItems,
+                                selectedIndex = inboxSelectedIndex,
+                                cameraClearanceDp = maxOf(56, expanded.topMarginDp, collapsed.heightDp + 12),
+                                onSelect = { entry ->
+                                    inboxOpen = false
+                                    onInboxOpenNotification(entry.key)
+                                },
+                                onClose = { inboxOpen = false },
+                            )
+                        } else if (content.emptyPill) {
                             if (content.expanded) {
                                 CenterContent(
                                     shortcuts = centerShortcuts,
@@ -1577,6 +1747,8 @@ private fun Modifier.islandTapGestures(
     replying: Boolean,
     emptyPill: Boolean,
     emptyOpensCenter: Boolean,
+    emptyOpensInbox: Boolean,
+    inboxLocked: Boolean,
     pressWidens: Boolean,
     vibrateOnTap: Boolean,
     scope: CoroutineScope,
@@ -1590,7 +1762,7 @@ private fun Modifier.islandTapGestures(
     perform: (GestureAction) -> Unit,
     onEmptyClick: () -> Unit,
     onActivate: () -> Unit,
-): Modifier = pointerInput(forcedExpanded, isExpanded, replying, emptyPill, pressWidens, event?.id, tapAction, canActivate) {
+): Modifier = pointerInput(forcedExpanded, isExpanded, replying, emptyPill, pressWidens, event?.id, tapAction, canActivate, emptyOpensInbox, inboxLocked) {
     if (forcedExpanded == true) return@pointerInput
 
     detectTapGestures(
@@ -1626,7 +1798,11 @@ private fun Modifier.islandTapGestures(
 
             if (emptyPill) {
                 if (!emptyOpensCenter) {
-                    onEmptyClick()
+                    if (emptyOpensInbox || tapAction == GestureAction.OPEN_INBOX) {
+                        perform(GestureAction.OPEN_INBOX)
+                    } else {
+                        onEmptyClick()
+                    }
                 } else if (forcedExpanded == null) {
                     tapExpanded.value = !tapExpanded.value
                     if (tapExpanded.value) {
@@ -1721,12 +1897,8 @@ private fun Modifier.islandVerticalSwipe(
 }
 
 /**
- * Swipe sideways to dismiss the cutout past [SWIPE_DISMISS_THRESHOLD_DP], which for a notification
- * also clears it from the system. The caller passes the current size's [leftAction] and
- * [rightAction]; only a side set to [GestureAction.DISMISS] can be dragged (the offset is clamped
- * to the allowed side), and a drag that stops short springs back to rest. The resting empty
- * cutout is meant to stay, so a swipe must neither slide it away nor clear the departed
- * notification it still remembers.
+ * Handles dismissal and inbox navigation with the same threshold, without clearing notifications
+ * when the user explicitly selected next/previous in Gesture settings.
  */
 private fun Modifier.islandSwipeToDismiss(
     event: IslandEvent?,
@@ -1738,37 +1910,51 @@ private fun Modifier.islandSwipeToDismiss(
     scope: CoroutineScope,
     dismissOffsetX: Animatable<Float, AnimationVector1D>,
     onDismiss: () -> Unit,
-): Modifier = pointerInput(forcedExpanded, leftAction, rightAction, replying, emptyPill, event?.id) {
-    val allowLeft = leftAction == GestureAction.DISMISS
-    val allowRight = rightAction == GestureAction.DISMISS
-    if (forcedExpanded != null || (!allowLeft && !allowRight) || replying || emptyPill) return@pointerInput
+    onNavigate: (GestureAction) -> Unit,
+    navRevision: Int,
+): Modifier = pointerInput(forcedExpanded, leftAction, rightAction, replying, emptyPill, event?.id, navRevision) {
+    val canLeft = leftAction == GestureAction.DISMISS ||
+        leftAction == GestureAction.NEXT_NOTIFICATION || leftAction == GestureAction.PREVIOUS_NOTIFICATION
+    val canRight = rightAction == GestureAction.DISMISS ||
+        rightAction == GestureAction.NEXT_NOTIFICATION || rightAction == GestureAction.PREVIOUS_NOTIFICATION
+    if (forcedExpanded != null || (!canLeft && !canRight) || replying ||
+        (emptyPill && leftAction == GestureAction.DISMISS && rightAction == GestureAction.DISMISS)
+    ) return@pointerInput
 
     val threshold = SWIPE_DISMISS_THRESHOLD_DP.dp.toPx()
+    var travel = 0f
+    fun settle() = scope.launch { dismissOffsetX.animateTo(0f) }
+
     detectHorizontalDragGestures(
+        onDragStart = { travel = 0f },
         onDragEnd = {
-            val x = dismissOffsetX.value
-            val dismiss = (x <= -threshold && allowLeft) || (x >= threshold && allowRight)
-            if (dismiss) {
-                onDismiss()
-            } else {
-                scope.launch {
-                    dismissOffsetX.animateTo(
-                        targetValue = 0f,
-                        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow),
-                    )
+            val action = when {
+                travel <= -threshold && canLeft -> leftAction
+                travel >= threshold && canRight -> rightAction
+                else -> GestureAction.NONE
+            }
+            when (action) {
+                GestureAction.DISMISS -> if (!emptyPill) onDismiss() else settle()
+                GestureAction.NEXT_NOTIFICATION, GestureAction.PREVIOUS_NOTIFICATION -> {
+                    onNavigate(action)
+                    settle()
                 }
+                else -> settle()
             }
         },
-        onDragCancel = { scope.launch { dismissOffsetX.animateTo(0f) } },
-    ) { change, dragAmount ->
-        val next = (dismissOffsetX.value + dragAmount).let {
+        onDragCancel = { settle() },
+    ) { change, delta ->
+        travel = (travel + delta).let {
             when {
-                !allowLeft -> it.coerceAtLeast(0f)
-                !allowRight -> it.coerceAtMost(0f)
+                !canLeft -> it.coerceAtLeast(0f)
+                !canRight -> it.coerceAtMost(0f)
                 else -> it
             }
         }
-        scope.launch { dismissOffsetX.snapTo(next) }
+        val action = if (travel < 0f) leftAction else rightAction
+        if (action == GestureAction.DISMISS && !emptyPill) {
+            scope.launch { dismissOffsetX.snapTo(travel) }
+        }
         change.consume()
     }
 }

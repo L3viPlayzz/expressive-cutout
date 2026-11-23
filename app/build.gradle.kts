@@ -42,6 +42,9 @@ android {
 	}
 
     buildTypes {
+        getByName("debug") {
+            applicationIdSuffix = ".xtreme"
+        }
 		getByName("release") {
 			val releaseSigning = signingConfigs.getByName("release")
 			if (releaseSigning.storeFile != null) {

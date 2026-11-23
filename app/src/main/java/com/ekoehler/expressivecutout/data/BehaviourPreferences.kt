@@ -20,11 +20,12 @@ private val Context.behaviourDataStore: DataStore<Preferences> by preferencesDat
 enum class HorizontalCutoutMode { HIDDEN, NORMAL_ONLY, STICK_TO_CAMERA, CENTER }
 
 /**
- * What a tap or vertical swipe on the island does. [NONE] ignores the gesture; [EXPAND] and
+ * What a tap or swipe on the island does. [NONE] ignores the gesture; [EXPAND] and
  * [SHRINK] grow or collapse the island; [OPEN_APP] launches the event's app; [DISMISS] removes
- * the current event.
+ * the current event; [OPEN_INBOX] displays active notifications; the next/previous actions browse
+ * without dismissing the notifications.
  */
-enum class GestureAction { NONE, EXPAND, SHRINK, OPEN_APP, DISMISS }
+enum class GestureAction { NONE, EXPAND, SHRINK, OPEN_APP, DISMISS, OPEN_INBOX, NEXT_NOTIFICATION, PREVIOUS_NOTIFICATION }
 
 /**
  * Which side of the primary pill the satellite bubble sits on when the island is split. The primary
@@ -78,10 +79,10 @@ enum class ActionButtonAnimation { SCALE, EXPAND }
 
 /**
  * What tapping the resting (event-less) empty pill does. [NONE] only plays the press animation;
- * [OPEN_APP] launches the app chosen in [BehaviourSettings.showsWhenEmptyClickPackage]; [OPEN_CENTER]
- * is reserved for a future feature. Ordered to match the settings selector.
+ * [OPEN_APP] launches the app chosen in [BehaviourSettings.showsWhenEmptyClickPackage];
+ * [OPEN_CENTER] shows the shortcut grid and [OPEN_INBOX] displays active notifications. Ordered to match the settings selector.
  */
-enum class EmptyClickAction { NONE, OPEN_APP, OPEN_CENTER }
+enum class EmptyClickAction { NONE, OPEN_APP, OPEN_CENTER, OPEN_INBOX }
 
 /**
  * How the island behaves once expanded. [expandedAutoCollapse] chooses between collapsing after

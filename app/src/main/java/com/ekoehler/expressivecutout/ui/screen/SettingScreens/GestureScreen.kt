@@ -32,6 +32,9 @@ private val GestureAction.titleRes: Int
         GestureAction.SHRINK -> R.string.gesture_action_shrink
         GestureAction.OPEN_APP -> R.string.gesture_action_open_app
         GestureAction.DISMISS -> R.string.gesture_action_dismiss
+        GestureAction.OPEN_INBOX -> R.string.gesture_action_open_inbox
+        GestureAction.NEXT_NOTIFICATION -> R.string.gesture_action_next_notification
+        GestureAction.PREVIOUS_NOTIFICATION -> R.string.gesture_action_previous_notification
     }
 
 /** One-line explanation shown under each gesture action. */
@@ -42,6 +45,9 @@ private val GestureAction.descriptionRes: Int
         GestureAction.SHRINK -> R.string.gesture_action_shrink_desc
         GestureAction.OPEN_APP -> R.string.gesture_action_open_app_desc
         GestureAction.DISMISS -> R.string.gesture_action_dismiss_desc
+        GestureAction.OPEN_INBOX -> R.string.gesture_action_open_inbox_desc
+        GestureAction.NEXT_NOTIFICATION -> R.string.gesture_action_next_notification_desc
+        GestureAction.PREVIOUS_NOTIFICATION -> R.string.gesture_action_previous_notification_desc
     }
 
 /**
@@ -89,21 +95,30 @@ internal fun GestureScreen(
             GestureCard(
                 titleRes = R.string.gesture_swipe_left,
                 descriptionRes = R.string.gesture_swipe_left_desc,
-                actions = listOf(GestureAction.NONE, GestureAction.DISMISS),
+                actions = listOf(
+                    GestureAction.NONE, GestureAction.DISMISS,
+                    GestureAction.NEXT_NOTIFICATION, GestureAction.PREVIOUS_NOTIFICATION,
+                ),
                 selected = behaviour.normalSwipeLeft,
                 onSelect = viewModel::setNormalSwipeLeft,
             )
             GestureCard(
                 titleRes = R.string.gesture_swipe_right,
                 descriptionRes = R.string.gesture_swipe_right_desc,
-                actions = listOf(GestureAction.NONE, GestureAction.DISMISS),
+                actions = listOf(
+                    GestureAction.NONE, GestureAction.DISMISS,
+                    GestureAction.NEXT_NOTIFICATION, GestureAction.PREVIOUS_NOTIFICATION,
+                ),
                 selected = behaviour.normalSwipeRight,
                 onSelect = viewModel::setNormalSwipeRight,
             )
             GestureCard(
                 titleRes = R.string.gesture_tap,
                 descriptionRes = R.string.gesture_tap_desc,
-                actions = listOf(GestureAction.NONE, GestureAction.EXPAND, GestureAction.OPEN_APP),
+                actions = listOf(
+                    GestureAction.NONE, GestureAction.EXPAND,
+                    GestureAction.OPEN_APP, GestureAction.OPEN_INBOX,
+                ),
                 selected = behaviour.normalTap,
                 onSelect = viewModel::setNormalTap,
                 isLast = true,
@@ -132,21 +147,30 @@ internal fun GestureScreen(
             GestureCard(
                 titleRes = R.string.gesture_swipe_left,
                 descriptionRes = R.string.gesture_swipe_left_desc,
-                actions = listOf(GestureAction.NONE, GestureAction.DISMISS),
+                actions = listOf(
+                    GestureAction.NONE, GestureAction.DISMISS,
+                    GestureAction.NEXT_NOTIFICATION, GestureAction.PREVIOUS_NOTIFICATION,
+                ),
                 selected = behaviour.expandedSwipeLeft,
                 onSelect = viewModel::setExpandedSwipeLeft,
             )
             GestureCard(
                 titleRes = R.string.gesture_swipe_right,
                 descriptionRes = R.string.gesture_swipe_right_desc,
-                actions = listOf(GestureAction.NONE, GestureAction.DISMISS),
+                actions = listOf(
+                    GestureAction.NONE, GestureAction.DISMISS,
+                    GestureAction.NEXT_NOTIFICATION, GestureAction.PREVIOUS_NOTIFICATION,
+                ),
                 selected = behaviour.expandedSwipeRight,
                 onSelect = viewModel::setExpandedSwipeRight,
             )
             GestureCard(
                 titleRes = R.string.gesture_tap,
                 descriptionRes = R.string.gesture_tap_desc,
-                actions = listOf(GestureAction.NONE, GestureAction.OPEN_APP, GestureAction.SHRINK),
+                actions = listOf(
+                    GestureAction.NONE, GestureAction.OPEN_APP,
+                    GestureAction.SHRINK, GestureAction.OPEN_INBOX,
+                ),
                 selected = behaviour.expandedTap,
                 onSelect = viewModel::setExpandedTap,
                 isLast = true,

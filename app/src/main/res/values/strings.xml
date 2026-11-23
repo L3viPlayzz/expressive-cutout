@@ -582,6 +582,16 @@
     <string name="gesture_action_open_app_desc">Open the app that sent it</string>
     <string name="gesture_action_dismiss">Dismiss</string>
     <string name="gesture_action_dismiss_desc">Hide the cutout and clear the notification</string>
+    <string name="gesture_action_open_inbox">Notification inbox</string>
+    <string name="gesture_action_open_inbox_desc">Open all active notifications inside the island</string>
+    <string name="gesture_action_next_notification">Next notification</string>
+    <string name="gesture_action_next_notification_desc">Show the next notification without dismissing it</string>
+    <string name="gesture_action_previous_notification">Previous notification</string>
+    <string name="gesture_action_previous_notification_desc">Show the previous notification without dismissing it</string>
+    <string name="xtreme_inbox_title">Notifications</string>
+    <string name="xtreme_inbox_empty">No active notifications</string>
+    <string name="xtreme_inbox_hint">Swipe left or right to switch</string>
+
     <string name="behaviour_empty_pill">Shows when empty</string>
     <string name="behaviour_empty_pill_desc">When no notification is displayed, the cutout stays on the screen</string>
     <string name="system_events_status_dot">Show status dot</string>
