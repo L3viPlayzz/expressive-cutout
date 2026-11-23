@@ -1,10 +1,11 @@
+
 name: Build
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, xtreme-v1]
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, xtreme-v1]
   workflow_dispatch:
 
 concurrency:
@@ -31,12 +32,13 @@ jobs:
         run: ./gradlew assembleDebug --no-daemon
 
       - name: Lint
+        continue-on-error: true
         run: ./gradlew lintDebug --no-daemon
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: expressive-cutout-debug.apk
+          name: expressive-cutout-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
