@@ -4221,6 +4221,11 @@ private fun MediaExpandedContent(
                         )
                     }
                 }
+                // Hybrid Xtreme: a restrained live equalizer that moves only during playback.
+                HybridMusicEqualizer(
+                    playing = nowPlaying?.isPlaying == true,
+                    accent = Color(0xFF73B9FF),
+                )
                 like?.let { LikeButton(it) }
             }
 
@@ -4256,6 +4261,50 @@ private fun MediaExpandedContent(
                     onNext = { nowPlaying?.transport?.next() },
                 )
             }
+        }
+    }
+}
+
+/**
+ * Five tiny, low-cost animated bars for the Hybrid Xtreme music card. Animations are
+ * composed only while playback is active; a paused session displays a static waveform.
+ * This is a decorative activity indicator, not a microphone/audio-spectrum capture.
+ */
+@Composable
+private fun HybridMusicEqualizer(
+    playing: Boolean,
+    accent: Color,
+) {
+    val transition = rememberInfiniteTransition(label = "xtreme-music-equalizer")
+    val heights = listOf(0.38f, 0.82f, 0.55f, 1f, 0.48f)
+    Row(
+        modifier = Modifier
+            .width(29.dp)
+            .height(21.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        heights.forEachIndexed { index, baseline ->
+            val pulse by transition.animateFloat(
+                initialValue = baseline,
+                targetValue = (1.06f - baseline).coerceIn(0.22f, 1f),
+                animationSpec = infiniteRepeatable(
+                    animation = tween(
+                        durationMillis = 540 + index * 110,
+                        easing = LinearEasing,
+                    ),
+                    repeatMode = RepeatMode.Reverse,
+                ),
+                label = "xtreme-bar-$index",
+            )
+            val heightFraction = if (playing) pulse else baseline * 0.55f
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height((4f + 16f * heightFraction).dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(if (index % 2 == 0) accent else Color(0xFFB59AFF)),
+            )
         }
     }
 }
