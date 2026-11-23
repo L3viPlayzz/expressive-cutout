@@ -4,7 +4,8 @@ on:
   push:
     branches: [dev]
     paths:
-      - 'Expressive_Cutout_Xtreme_v1_Changed_Files.zip'
+      - 'Expressive_Cutout_Xtreme_v1_Changed_Files*.zip'
+      - '.github/workflows/apply-xtreme-v1.yml'
 
 permissions:
   contents: write
@@ -21,12 +22,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          archive="Expressive_Cutout_Xtreme_v1_Changed_Files.zip"
+          archive="Expressive_Cutout_Xtreme_v1_Changed_Files (1).zip"
           test -f "$archive"
           python3 - <<'PY'
           from pathlib import Path
           import zipfile
-          archive=Path("Expressive_Cutout_Xtreme_v1_Changed_Files.zip")
+          archive=Path("Expressive_Cutout_Xtreme_v1_Changed_Files (1).zip")
           allowed={
             "XTREME_README.md",
             "app/build.gradle.kts",
