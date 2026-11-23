@@ -165,7 +165,7 @@ data class MusicTileSettings(
         const val DEFAULT_EXPAND_ON_PLAY = true
         const val DEFAULT_VISIBLE_IN_PLAYER_APP = true
         const val DEFAULT_SHOW_CONTROLS = true
-        const val DEFAULT_SHOW_PROGRESS = false
+        const val DEFAULT_SHOW_PROGRESS = true
         const val DEFAULT_MINI_PLAYER = false
         const val DEFAULT_RIGHT_BUTTON = false
         val DEFAULT_RIGHT_BUTTON_ACTION = MusicRightButtonAction.PLAY_PAUSE
