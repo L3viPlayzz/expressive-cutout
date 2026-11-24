@@ -124,7 +124,11 @@ class NexoraActivity : Activity() {
         }
         add(modes,14)
         adjustment("Width","island_width",85,120,100,"%")
-        adjustment("Height","island_height_v2",20,44,28," dp")
+        val cameraBounds=CutoutMetrics.displayCutoutBoundsPx(this)
+        val cameraMin=kotlin.math.ceil((cameraBounds?.height() ?: dp(12).toFloat()) / resources.displayMetrics.density + 3f).toInt().coerceAtLeast(20)
+        if(cameraMin<=44) adjustment("Height","island_height_v2",cameraMin,44,28," dp")
+        else add(label("Minimum safe height: ${cameraMin} dp (device camera clearance)",14f,muted))
+        add(label("Minimum safe height on this display: ${cameraMin} dp",12f,muted),8)
         adjustment("Horizontal offset","island_x",-24,24,0," dp")
         adjustment("Vertical offset","island_y_v2",-10,10,0," dp")
         add(label("Height now adjusts the capsule itself. Camera clearance can limit the smallest height and offsets.",12f,muted))
