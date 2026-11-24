@@ -1,8 +1,8 @@
 <resources>
-    <string name="app_name">Expressive Cutout</string>
-    <string name="accessibility_service_label">Expressive Cutout overlay</string>
+    <string name="app_name">NEXORA</string>
+    <string name="accessibility_service_label">NEXORA overlay</string>
     <string name="accessibility_service_description">Draws a small dynamic island over the camera cutout to surface notifications and system events. It reads only which app is in the foreground. Nothing it reads is ever stored or sent anywhere — the app has no internet access.</string>
-    <string name="notification_service_label">Expressive Cutout notifications</string>
+    <string name="notification_service_label">NEXORA notifications</string>
 
     <!-- System event labels shown inside the island -->
     <string name="event_charging_started">Charging</string>
@@ -65,7 +65,7 @@
     <string name="tile_timer_desc">Show a running countdown timer on the cutout</string>
 
     <!-- Setup screen -->
-    <string name="setup_title">Expressive Cutout</string>
+    <string name="setup_title">NEXORA</string>
     <string name="perm_notifications_title">Notification access</string>
     <string name="perm_notifications_desc">Lets the island mirror incoming app notifications.</string>
     <string name="perm_accessibility_title">Overlay access</string>
@@ -373,7 +373,7 @@
     <string name="shizuku_not_running_title">Shizuku isn\'t running</string>
     <string name="shizuku_not_running_desc">Start it from the Shizuku app, then come back. It stops on every reboot.</string>
     <string name="shizuku_permission_title">Grant Shizuku access</string>
-    <string name="shizuku_permission_desc">Tap to let Expressive Cutout use Shizuku.</string>
+    <string name="shizuku_permission_desc">Tap to let NEXORA use Shizuku.</string>
     <string name="perm_phone_state_title">Phone state</string>
     <string name="perm_phone_state_desc">Optional. Closes the phone tile the moment a call ends.</string>
     <string name="perm_shizuku_title">Shizuku</string>
@@ -754,7 +754,7 @@
     <string name="profile_reddit_url">https://www.reddit.com/r/ExpressiveByEvan</string>
     <string name="edroid_github_url">https://github.com/EvanKoe/E-Droid/</string>
     <string name="app_tagline">An offline dynamic island that follows Google\'s Material Expressive design</string>
-    <string name="app_icon_description">Expressive Cutout icon</string>
+    <string name="app_icon_description">NEXORA icon</string>
     <string name="dev_card_author">Expressive By Evan</string>
     <string name="dev_card_github">View on GitHub</string>
     <string name="dev_card_linkedin">LinkedIn</string>
