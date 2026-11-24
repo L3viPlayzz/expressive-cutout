@@ -70,24 +70,24 @@ class NexoraActivity : Activity() {
         calibrating=false
         drawMenu()
     }
-    private fun adjustment(title:String,key:String,min:Int,max:Int,default:Int,unit:String){
+    private fun adjustment(title:String,key:String,low:Int,high:Int,default:Int,unit:String){
         val section=LinearLayout(this).apply{
             orientation=LinearLayout.VERTICAL
             setPadding(dp(16),dp(12),dp(16),dp(10))
             background=surface(Color.rgb(19,21,30))
         }
-        val initial=prefs.getInt(key,default).coerceIn(min,max)
+        val initial=prefs.getInt(key,default).coerceIn(low,high)
         val caption=label("$title  •  $initial$unit",15f,white,true)
         section.addView(caption)
         val slider=SeekBar(this).apply{
-            this.max=max-min
-            progress=initial-min
+            this.max=high-low
+            progress=initial-low
             contentDescription=title
             progressTintList=android.content.res.ColorStateList.valueOf(blue)
             thumbTintList=android.content.res.ColorStateList.valueOf(violet)
             setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{
                 override fun onProgressChanged(bar:SeekBar?,progress:Int,fromUser:Boolean){
-                    val value=progress+min
+                    val value=progress+low
                     caption.text="$title  •  $value$unit"
                     if(fromUser)prefs.edit().putInt(key,value).apply()
                 }
@@ -99,7 +99,7 @@ class NexoraActivity : Activity() {
         add(section)
     }
     private fun drawCalibration(){
-        val scroll=ScrollView(this).apply{setBackgroundColor(Color.BLACK);isFillViewport=true;clipToPadding=false}
+        val scroll=ScrollView(this).apply{setBackgroundColor(Color.rgb(39,40,46));isFillViewport=true;clipToPadding=false}
         content=LinearLayout(this).apply{
             orientation=LinearLayout.VERTICAL
             setPadding(dp(20),dp(178),dp(20),dp(32))
