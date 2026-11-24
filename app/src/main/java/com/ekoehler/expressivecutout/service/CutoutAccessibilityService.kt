@@ -7,7 +7,7 @@ import android.view.accessibility.AccessibilityEvent
 import com.ekoehler.expressivecutout.core.ForegroundAppBus
 import com.ekoehler.expressivecutout.events.MediaPlaybackMonitor
 import com.ekoehler.expressivecutout.events.SystemEventMonitor
-import com.ekoehler.expressivecutout.overlay.IslandOverlayController
+import com.ekoehler.expressivecutout.nexora.NexoraOverlay
 import com.ekoehler.expressivecutout.system.AppLocale
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,7 +25,7 @@ class CutoutAccessibilityService : AccessibilityService() {
     /** Localises the strings the island itself draws. See [AppLocale]. */
     override fun attachBaseContext(base: Context) = super.attachBaseContext(AppLocale.wrap(base))
 
-    private var overlay: IslandOverlayController? = null
+    private var overlay: NexoraOverlay? = null
     private var systemEvents: SystemEventMonitor? = null
     private var mediaPlayback: MediaPlaybackMonitor? = null
 
@@ -35,7 +35,7 @@ class CutoutAccessibilityService : AccessibilityService() {
      */
     override fun onServiceConnected() {
         super.onServiceConnected()
-        overlay = IslandOverlayController(this).also { it.start() }
+        overlay = NexoraOverlay(this).also { it.start() }
         systemEvents = SystemEventMonitor(this).also { it.start() }
         mediaPlayback = MediaPlaybackMonitor(this).also { it.start() }
         instance = this
