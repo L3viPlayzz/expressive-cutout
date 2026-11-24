@@ -51,6 +51,16 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private val morphCurve = PathInterpolator(.22f, .8f, .24f, 1f)
     private val refresh = Runnable { render() }
     private val prefListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> render() }
+    private var screenReceiverRegistered = false
+    private val screenReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: android.content.Intent?) {
+            if (intent?.action == android.content.Intent.ACTION_SCREEN_OFF) {
+                handler.removeCallbacks(refresh)
+                flash = null; expanded = false; browsing = false; current = null
+                remove()
+            } else render()
+        }
+    }
     private data class Card(val kind: String, val title: String, val detail: String = "", val accent: Int = BLUE,
         val intent: PendingIntent? = null, val key: String? = null, val progress: Float? = null, val appIcon: android.graphics.drawable.Drawable? = null)
     companion object {
@@ -62,6 +72,16 @@ class NexoraOverlay(private val service: AccessibilityService) {
 
     fun start() {
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
+        val filter = android.content.IntentFilter().apply {
+            addAction(android.content.Intent.ACTION_SCREEN_OFF)
+            addAction(android.content.Intent.ACTION_SCREEN_ON)
+            addAction(android.content.Intent.ACTION_USER_PRESENT)
+        }
+        screenReceiverRegistered = runCatching {
+            if (Build.VERSION.SDK_INT >= 33) service.registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            else service.registerReceiver(screenReceiver, filter)
+            true
+        }.getOrDefault(false)
         scope.launch { IslandEventBus.signals.collect { signal ->
             when (signal) {
                 is CutoutSignal.Notification -> {
@@ -233,6 +253,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
     fun stop() {
         handler.removeCallbacksAndMessages(null)
         prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
+        if (screenReceiverRegistered) runCatching { service.unregisterReceiver(screenReceiver) }
+        screenReceiverRegistered = false
         scope.cancel()
         remove()
     }
@@ -265,6 +287,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val rect = RectF()
         private val path = Path()
+        private val normalTypeface = Typeface.create("sans-serif", Typeface.NORMAL)
+        private val mediumTypeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         private var began = SystemClock.uptimeMillis()
         private var downX = 0f; private var downY = 0f
         private var downTime = 0L
@@ -279,7 +303,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         private fun color(c: Int, a: Int = 255) { paint.color = c; paint.alpha = a; paint.style = Paint.Style.FILL; paint.shader = null }
         private fun text(canvas: Canvas, value: String, x: Float, y: Float, size: Float, col: Int, maxWidth: Float, bold: Boolean = false) {
             if (maxWidth <= 0f) return
-            color(col); paint.textSize = dp(size); paint.typeface = if (bold) Typeface.create("sans-serif-medium", Typeface.NORMAL) else Typeface.create("sans-serif", Typeface.NORMAL)
+            color(col); paint.textSize = dp(size); paint.typeface = if (bold) mediumTypeface else normalTypeface
             val line = android.text.TextUtils.ellipsize(value.replace('\n', ' '), android.text.TextPaint(paint), maxWidth, android.text.TextUtils.TruncateAt.END)
             canvas.drawText(line.toString(), x, y, paint)
         }
@@ -300,7 +324,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             paint.style = Paint.Style.FILL
             if (w < dp(108f)) { if(age<1.3f) postInvalidateOnAnimation(); return }
             val contentAlpha = ((w-dp(108f))/dp(38f)).coerceIn(0f,1f)
-            canvas.saveLayerAlpha(0f,0f,w,h,(contentAlpha*255).toInt())
+            if (contentAlpha < .999f) canvas.saveLayerAlpha(0f,0f,w,h,(contentAlpha*255).toInt()) else canvas.save()
             val left = dp(14f)
             val right = cameraX + cameraRadius + dp(9f)
             val cy = cameraY
@@ -314,7 +338,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 }
                 "unlock","lock" -> {
                     paint.style=Paint.Style.STROKE
-                    canvas.drawArc(cameraX-cameraRadius-dp(5f),cy-cameraRadius-dp(5f),cameraX+cameraRadius+dp(5f),cy+cameraRadius+dp(5f),-90f+age*160f, min(360f,90f+age*380f),false,paint)
+                    canvas.drawArc(cameraX-cameraRadius-dp(5f),cy-cameraRadius-dp(5f),cameraX+cameraRadius+dp(5f),cy+cameraRadius+dp(5f),-90f+age*160f, min(360f,60f+age*500f),false,paint)
                     if(card.kind=="unlock"){canvas.drawLine(iconX-dp(6f),cy,iconX-dp(1f),cy+dp(5f),paint);canvas.drawLine(iconX-dp(1f),cy+dp(5f),iconX+dp(8f),cy-dp(5f),paint)}
                     else canvas.drawRoundRect(iconX-dp(6f),cy-dp(4f),iconX+dp(6f),cy+dp(6f),dp(2f),dp(2f),paint)
                     paint.style=Paint.Style.FILL
@@ -345,17 +369,17 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 "timer" -> "Timer"
                 else -> card.title
             }
-            if (card.kind == "music") {
+            if (card.kind == "music" && w > dp(135f)) {
                 val playing = NowPlayingBus.state.value?.isPlaying == true
-                val waveX = w-dp(34f)
+                val waveX = max(right, w-dp(34f))
                 for(i in 0..4) {
                     val bar = dp(if(playing) 4f+11f*(.5f+.5f*sin(age*5.5f+i*1.1f)) else 4f)
                     color(if(i%2==0) BLUE else VIOLET)
                     canvas.drawRoundRect(waveX+i*dp(4f),cy-bar/2,waveX+i*dp(4f)+dp(2.3f),cy+bar/2,dp(1.2f),dp(1.2f),paint)
                 }
-            } else text(canvas,short,right,cy+dp(4f),11f,if(card.kind=="message") Color.WHITE else accent,maxRight,true)
+            } else if (card.kind != "music") text(canvas,short,right,cy+dp(4f),11f,if(card.kind=="message") Color.WHITE else accent,maxRight,true)
             if(expansion > .15f) {
-                canvas.saveLayerAlpha(0f,topHeight,w,h,(((expansion-.15f)/.75f).coerceIn(0f,1f)*255).toInt())
+                if (expansion < .90f) canvas.saveLayerAlpha(0f,topHeight,w,h,(((expansion-.15f)/.75f).coerceIn(0f,1f)*255).toInt()) else canvas.save()
                 val y=topHeight
                 text(canvas,card.title,left,y+dp(22f),17f,Color.WHITE,w-left*2,true)
                 var detail=card.detail
