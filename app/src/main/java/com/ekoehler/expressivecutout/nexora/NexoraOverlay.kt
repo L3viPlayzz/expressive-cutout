@@ -410,8 +410,17 @@ class NexoraOverlay(private val service: AccessibilityService) {
             RunningTimerBus.state.value?.actions?.firstOrNull()?.intent?.let { runCatching { it.send() } }
         } else if (c.kind == "call" && y > (panel?.topHeight ?: 0f) + dp(58f)) {
             val actions=callButtons()
-            val i=if(actions.size>1 && x>(panel?.visualWidth ?: 0f)/2f)1 else 0
-            actions.getOrNull(i)?.intent?.let { runCatching { it.send() } }
+            val w=panel?.visualWidth ?: return
+            val left=dp(14f)
+            val gap=dp(8f)
+            if(actions.isNotEmpty() && x>=left && x<=w-left && y<=(panel?.topHeight ?: 0f)+dp(89f)){
+                val bw=(w-2*left-gap*(actions.size-1))/actions.size
+                val i=actions.indices.firstOrNull{ index ->
+                    val start=left+index*(bw+gap)
+                    x>=start && x<=start+bw
+                }
+                i?.let { index -> runCatching { actions[index].intent.send() } }
+            }
         } else if (c.intent != null) runCatching { c.intent.send() }
         else if (c.key != null) CutoutNotificationListenerService.openFromInbox(c.key)
         else { expanded = false; render() }
