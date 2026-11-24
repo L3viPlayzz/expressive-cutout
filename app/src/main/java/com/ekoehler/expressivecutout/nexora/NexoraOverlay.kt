@@ -237,14 +237,16 @@ class NexoraOverlay(private val service: AccessibilityService) {
         val v = panel ?: IslandView().also { panel = it }
         val metrics = if (Build.VERSION.SDK_INT >= 30) wm.currentWindowMetrics else null
         val screenWidth = metrics?.bounds?.width() ?: service.resources.displayMetrics.widthPixels
-        val cutout = if (Build.VERSION.SDK_INT >= 30) metrics?.windowInsets?.displayCutout?.boundingRects?.firstOrNull { it.top <= dp(24f) && it.centerX() in (screenWidth / 4)..(screenWidth * 3 / 4) } else null
-        val cameraX = cutout?.centerX() ?: screenWidth / 2
+        val cutout = CutoutMetrics.displayCutoutBoundsPx(service)?.takeIf {
+            it.centerY() < dp(64f) && it.centerX() >= screenWidth/4f && it.centerX() <= screenWidth*3/4f
+        }
+        val cameraX = cutout?.centerX()?.roundToInt() ?: screenWidth / 2
         val preview = NexoraCalibration.mode.value.takeUnless { keyguard.isKeyguardLocked } ?: 0
         val isExpanded = if (preview != 0) preview == 2 else expanded
         val scale = prefs.getInt("island_width",100).coerceIn(85,120)/100f
         val requestedHeight = prefs.getInt("island_height_v2",28).coerceIn(20,44)
         val cameraRadius = max(dp(6f), (cutout?.width() ?: 0) / 2f + dp(1.5f))
-        physicalY = cutout?.exactCenterY() ?: dp(17f)
+        physicalY = cutout?.centerY() ?: dp(17f)
         val cameraHalfHeight = (cutout?.height()?.div(2f) ?: dp(6f)) + dp(1.5f)
         val topHeight = max(dp(requestedHeight.toFloat()).roundToInt(),ceil(cameraHalfHeight*2).toInt())
         val minY=ceil(physicalY+cameraHalfHeight-topHeight).toInt().coerceAtLeast(0)
@@ -344,6 +346,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val rect = RectF()
         private val path = Path()
+        private val silhouette = Path()
         private val normalTypeface = Typeface.create("sans-serif", Typeface.NORMAL)
         private val mediumTypeface = Typeface.create("sans-serif", Typeface.BOLD)
         private val textPaint = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG)
@@ -481,6 +484,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
             val radius = ((topHeight-2*inset)/2*(1f-expansion)+dp(31f)*expansion).coerceIn(0f, max(0f,(h-2*inset)/2))
             rect.set(inset, inset, w-inset, h-inset)
             color(Color.BLACK); canvas.drawRoundRect(rect, radius, radius, paint)
+            silhouette.reset(); silhouette.addRoundRect(rect,radius,radius,Path.Direction.CW)
+            canvas.clipPath(silhouette)
             // Reference has a pure black silhouette without a visible outline.
             if(card.kind=="music") {
                 if(w>dp(105f)) musicLayout(canvas,w,h,expansion,age)
@@ -494,17 +499,31 @@ class NexoraOverlay(private val service: AccessibilityService) {
             val right = cameraX + cameraRadius + dp(9f)
             val cy = cameraY
             val maxRight = (w-right-dp(12f)).coerceAtLeast(0f)
-            val iconX = if(card.kind=="energy") cameraX*.34f else left+dp(10f)
+            val iconX = if(card.kind=="energy") cameraX*.46f else left+dp(8f)
             color(accent); paint.strokeWidth = dp(2f); paint.strokeCap = Paint.Cap.ROUND
             when(card.kind) {
                 "energy" -> {
-                    path.reset(); path.moveTo(iconX+dp(2f),cy-dp(10f));path.lineTo(iconX-dp(6f),cy+dp(1f));path.lineTo(iconX,cy+dp(1f));path.lineTo(iconX-dp(2f),cy+dp(10f));path.lineTo(iconX+dp(7f),cy-dp(2f));path.lineTo(iconX+dp(1f),cy-dp(2f));path.close();canvas.drawPath(path,paint)
+                    val pulse=(age/.40f).coerceIn(0f,1f)
+                    val settle=1f-(1f-pulse)*(1f-pulse)*(1f-pulse)
+                    canvas.save(); canvas.scale(.72f+.28f*settle,.72f+.28f*settle,iconX,cy)
+                    paint.alpha=(settle*255).toInt()
+                    path.reset(); path.moveTo(iconX+dp(2f),cy-dp(10f));path.lineTo(iconX-dp(6f),cy+dp(1f));path.lineTo(iconX,cy+dp(1f));path.lineTo(iconX-dp(2f),cy+dp(10f));path.lineTo(iconX+dp(7f),cy-dp(2f));path.lineTo(iconX+dp(1f),cy-dp(2f));path.close();canvas.drawPath(path,paint);canvas.restore()
                     // Compact charge card: only the lightning glyph and true battery level.
                 }
                 "unlock","lock" -> {
                     paint.style=Paint.Style.STROKE
-                    canvas.drawArc(cameraX-cameraRadius-dp(5f),cy-cameraRadius-dp(5f),cameraX+cameraRadius+dp(5f),cy+cameraRadius+dp(5f),-90f+age*160f, min(360f,60f+age*500f),false,paint)
-                    if(card.kind=="unlock"){canvas.drawLine(iconX-dp(6f),cy,iconX-dp(1f),cy+dp(5f),paint);canvas.drawLine(iconX-dp(1f),cy+dp(5f),iconX+dp(8f),cy-dp(5f),paint)}
+                    val ring=cameraRadius+dp(1.5f)
+                    if(ring+dp(1f)<min(cy,topHeight-cy)) {
+                        val t=(age/.55f).coerceIn(0f,1f)
+                        canvas.drawArc(cameraX-ring,cy-ring,cameraX+ring,cy+ring,-90f,360f*(1f-(1f-t)*(1f-t)),false,paint)
+                    }
+                    if(card.kind=="unlock"){
+                        val t=(age/.32f).coerceIn(0f,1f)
+                        val first=(t*2f).coerceIn(0f,1f)
+                        val second=(t*2f-1f).coerceIn(0f,1f)
+                        canvas.drawLine(iconX-dp(6f),cy,iconX-dp(6f)+dp(5f)*first,cy+dp(5f)*first,paint)
+                        if(second>0f)canvas.drawLine(iconX-dp(1f),cy+dp(5f),iconX-dp(1f)+dp(9f)*second,cy+dp(5f)-dp(10f)*second,paint)
+                    }
                     else canvas.drawRoundRect(iconX-dp(6f),cy-dp(4f),iconX+dp(6f),cy+dp(6f),dp(2f),dp(2f),paint)
                     paint.style=Paint.Style.FILL
                 }
@@ -530,7 +549,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 else -> card.title
             }
             if (card.kind == "energy") {
-                val labelX=max(right,cameraX+(w-cameraX)*.32f)
+                val labelX=max(right,cameraX+(w-cameraX)*.28f)
                 text(canvas,short,labelX,cy+dp(5f),14f,accent,w-labelX-dp(8f),true)
             } else text(canvas,short,right,cy+dp(4f),11f,if(card.kind=="message") Color.WHITE else accent,maxRight,true)
             if(expansion > .15f) {
