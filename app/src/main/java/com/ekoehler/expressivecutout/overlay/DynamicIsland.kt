@@ -4275,35 +4275,35 @@ private fun HybridMusicEqualizer(
     playing: Boolean,
     accent: Color,
 ) {
-    val transition = rememberInfiniteTransition(label = "xtreme-music-equalizer")
-    val heights = listOf(0.38f, 0.82f, 0.55f, 1f, 0.48f)
-    Row(
-        modifier = Modifier
-            .width(29.dp)
-            .height(21.dp),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    val heights = remember { listOf(0.38f, 0.82f, 0.55f, 1f, 0.48f) }
+    val phase = if (playing) {
+        val transition = rememberInfiniteTransition(label = "nexora-music")
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 6.283185f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1250, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "nexora-phase",
+        )
+    } else null
+    androidx.compose.foundation.Canvas(
+        modifier = Modifier.width(29.dp).height(21.dp),
     ) {
+        val t = phase?.value ?: 0f
+        val barWidth = 3.dp.toPx()
+        val spacing = 3.dp.toPx()
         heights.forEachIndexed { index, baseline ->
-            val pulse by transition.animateFloat(
-                initialValue = baseline,
-                targetValue = (1.06f - baseline).coerceIn(0.22f, 1f),
-                animationSpec = infiniteRepeatable(
-                    animation = tween(
-                        durationMillis = 540 + index * 110,
-                        easing = LinearEasing,
-                    ),
-                    repeatMode = RepeatMode.Reverse,
-                ),
-                label = "xtreme-bar-$index",
-            )
-            val heightFraction = if (playing) pulse else baseline * 0.55f
-            Box(
-                modifier = Modifier
-                    .width(3.dp)
-                    .height((4f + 16f * heightFraction).dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(if (index % 2 == 0) accent else Color(0xFFB59AFF)),
+            val fraction = if (playing) {
+                (0.58f + 0.36f * kotlin.math.sin(t + index * 1.7f)).coerceIn(0.2f, 1f)
+            } else baseline * 0.55f
+            val h = size.height * fraction
+            drawRoundRect(
+                color = if (index % 2 == 0) accent else Color(0xFFB59AFF),
+                topLeft = androidx.compose.ui.geometry.Offset(index * (barWidth + spacing), (size.height - h) / 2),
+                size = androidx.compose.ui.geometry.Size(barWidth, h),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2),
             )
         }
     }
