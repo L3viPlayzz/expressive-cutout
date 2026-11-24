@@ -124,12 +124,12 @@ class NexoraActivity : Activity() {
         }
         add(modes,14)
         adjustment("Width","island_width",85,120,100,"%")
-        adjustment("Height","island_height",30,54,36," dp")
+        adjustment("Height","island_height_v2",20,44,28," dp")
         adjustment("Horizontal offset","island_x",-24,24,0," dp")
-        adjustment("Vertical offset","island_y",0,16,0," dp")
-        add(label("Camera clearance limits some adjustments so the island stays around your camera.",12f,muted))
+        adjustment("Vertical offset","island_y_v2",-10,10,0," dp")
+        add(label("Height now adjusts the capsule itself. Camera clearance can limit the smallest height and offsets.",12f,muted))
         button("Reset to default","Restore the approved proportions"){
-            prefs.edit().remove("island_width").remove("island_height").remove("island_x").remove("island_y").apply()
+            prefs.edit().remove("island_width").remove("island_height").remove("island_height_v2").remove("island_x").remove("island_y").remove("island_y_v2").apply()
             drawCalibration()
         }
         button("Done","Close preview and return to invisible standby when idle"){exitCalibration()}
