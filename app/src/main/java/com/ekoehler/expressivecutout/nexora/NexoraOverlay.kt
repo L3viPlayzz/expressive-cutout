@@ -17,13 +17,14 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import com.ekoehler.expressivecutout.core.*
 import com.ekoehler.expressivecutout.service.CutoutNotificationListenerService
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collect
 import kotlin.math.*
 
 /** NEXORA Reborn: independent native Canvas renderer; only the event producers are shared. */
 class NexoraOverlay(private val service: AccessibilityService) {
-    private val wm = service.getSystemService(WindowManager::class.java)
-    private val power = service.getSystemService(PowerManager::class.java)
-    private val keyguard = service.getSystemService(KeyguardManager::class.java)
+    private val wm = requireNotNull(service.getSystemService(WindowManager::class.java))
+    private val power = requireNotNull(service.getSystemService(PowerManager::class.java))
+    private val keyguard = requireNotNull(service.getSystemService(KeyguardManager::class.java))
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val handler = Handler(Looper.getMainLooper())
     private val prefs = service.getSharedPreferences("nexora", Context.MODE_PRIVATE)
@@ -77,7 +78,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                         else -> "system"
                     }
                     val accent = when {
-                        t.contains("DISCONNECTED") || t == "BATTERY_LOW" -> RED
+                        t.contains("DISCONNECTED") || t == "BATTERY_LOW" || t == "CHARGING_STOPPED" -> RED
                         kind == "energy" || kind == "unlock" -> GREEN
                         else -> BLUE
                     }
@@ -289,9 +290,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
             }
             val short = when(card.kind) {
                 "energy" -> card.detail.ifBlank { "Power" }
-                "music" -> "Playing"
+                "music" -> if (NowPlayingBus.state.value?.isPlaying == true) "Playing" else "Paused"
                 "unlock" -> "Unlocked"
-                "connect" -> "Connected"
+                "connect" -> card.title
                 "timer" -> "Timer"
                 else -> card.title
             }
