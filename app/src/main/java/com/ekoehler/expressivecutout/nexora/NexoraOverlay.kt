@@ -43,10 +43,16 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private var callActions: List<CutoutSignal.Notification.Action> = emptyList()
     private var current: Card? = null
     private var leaving = false
+    private var geometry: ValueAnimator? = null
+    private var targetWidth = 0
+    private var targetHeight = 0
+    private var centerX = 0
+    private var screenWidthPx = 0
+    private val morphCurve = PathInterpolator(.22f, .8f, .24f, 1f)
     private val refresh = Runnable { render() }
     private val prefListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> render() }
     private data class Card(val kind: String, val title: String, val detail: String = "", val accent: Int = BLUE,
-        val intent: PendingIntent? = null, val key: String? = null, val progress: Float? = null)
+        val intent: PendingIntent? = null, val key: String? = null, val progress: Float? = null, val appIcon: android.graphics.drawable.Drawable? = null)
     companion object {
         private val BLUE = Color.rgb(99, 202, 255)
         private val VIOLET = Color.rgb(181, 151, 255)
@@ -65,7 +71,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
                         val p = signal.progressData
                         show(Card("message", signal.title ?: signal.appName ?: "Notification",
                             signal.text ?: signal.appName.orEmpty(), BLUE, signal.contentIntent, signal.key,
-                            p?.takeIf { it.max > 0 }?.let { it.current.toFloat() / it.max }))
+                            p?.takeIf { it.max > 0 }?.let { it.current.toFloat() / it.max },
+                            runCatching { service.packageManager.getApplicationIcon(signal.packageName) }.getOrNull()))
                     }
                 }
                 is CutoutSignal.System -> if (prefs.getBoolean("events", true)) {
@@ -125,6 +132,40 @@ class NexoraOverlay(private val service: AccessibilityService) {
         }
         return result
     }
+    // Animate the actual window bounds, not a scaled screenshot of its contents.
+    // Retarget from the current geometry if another activity arrives mid-transition.
+    private fun morph(v: IslandView, w: Int, h: Int, dismiss: Boolean = false) {
+        val lp = params ?: return
+        if (!dismiss && !leaving && targetWidth == w && targetHeight == h) return
+        geometry?.cancel()
+        targetWidth = w
+        targetHeight = h
+        val fromW = lp.width
+        val fromH = lp.height
+        geometry = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = if (dismiss) 230L else if (h > fromH) 360L else 300L
+            interpolator = morphCurve
+            addUpdateListener { a ->
+                val t = a.animatedValue as Float
+                lp.width = (fromW + (w-fromW)*t).roundToInt().coerceAtLeast(1)
+                lp.height = (fromH + (h-fromH)*t).roundToInt().coerceAtLeast(1)
+                lp.x = (centerX - lp.width/2).coerceIn(0,(screenWidthPx-lp.width).coerceAtLeast(0))
+                v.cameraX = (centerX-lp.x).toFloat()
+                v.alpha = if (dismiss) 1f-t else 1f
+                runCatching { wm.updateViewLayout(v,lp) }
+                v.invalidate()
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                private var cancelled = false
+                override fun onAnimationCancel(animation: android.animation.Animator) { cancelled = true }
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (!cancelled && dismiss && leaving) remove()
+                }
+            })
+            start()
+        }
+    }
+
     private fun render() {
         handler.removeCallbacks(refresh)
         if (!prefs.getBoolean("enabled", true) || !power.isInteractive || service.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_PORTRAIT) {
@@ -142,10 +183,12 @@ class NexoraOverlay(private val service: AccessibilityService) {
         val cutout = if (Build.VERSION.SDK_INT >= 30) metrics?.windowInsets?.displayCutout?.boundingRects?.firstOrNull { it.top <= dp(24f) && it.centerX() in (screenWidth / 4)..(screenWidth * 3 / 4) } else null
         val cameraX = cutout?.centerX() ?: screenWidth / 2
         val topHeight = max(dp(36f).toInt(), (cutout?.bottom ?: 0) + dp(6f).toInt())
-        val width = min(screenWidth - dp(12f).toInt(), dp(if (expanded) 338f else 228f).toInt())
+        val width = min(screenWidth - dp(12f).toInt(), dp(if (expanded) 324f else if (next.kind == "music") 152f else 194f).toInt())
         val height = topHeight + if (expanded) dp(100f).toInt() else 0
+        centerX = cameraX
+        screenWidthPx = screenWidth
         val x = (cameraX - width / 2).coerceIn(0, (screenWidth-width).coerceAtLeast(0))
-        v.cameraX = (cameraX - x).toFloat()
+        v.cameraX = (cameraX - (params?.x ?: x)).toFloat()
         v.cameraY = cutout?.centerY()?.toFloat() ?: topHeight * .46f
         v.cameraRadius = max(dp(8f), (cutout?.width() ?: 0) / 2f + dp(3f))
         v.topHeight = topHeight.toFloat()
@@ -154,23 +197,21 @@ class NexoraOverlay(private val service: AccessibilityService) {
         v.index = selection
         v.open = expanded
         if (params == null) {
-            val lp = WindowManager.LayoutParams(width, height, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            val seed = min(width, max(dp(48f).toInt(), (v.cameraRadius * 2 + dp(12f)).toInt()))
+            val lp = WindowManager.LayoutParams(seed, topHeight, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT)
             lp.gravity = Gravity.TOP or Gravity.LEFT
-            lp.x = x
+            lp.x = (cameraX - seed / 2).coerceIn(0,(screenWidth-seed).coerceAtLeast(0))
+            v.cameraX = (cameraX - lp.x).toFloat()
             lp.y = 0
             lp.layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= 30) WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             lp.title = "NEXORA"
-            try { wm.addView(v, lp); params = lp; v.enter() } catch (_: Exception) { panel = null; return }
+            try { wm.addView(v, lp); params = lp; targetWidth = 0; targetHeight = 0; v.enter(); morph(v,width,height) } catch (_: Exception) { panel = null; params = null; return }
         } else {
-            val lp = params ?: return
-            if (lp.width != width || lp.height != height || lp.x != x) {
-                lp.width = width; lp.height = height; lp.x = x
-                runCatching { wm.updateViewLayout(v, lp) }
-            }
-            if (leaving) { leaving = false; v.animate().cancel(); v.enter() }
-            else if (changed) v.enter()
+            if (leaving) { leaving = false; geometry?.cancel(); targetWidth = 0; targetHeight = 0; v.alpha = 1f }
+            if (changed) v.enter()
+            morph(v,width,height)
         }
         v.invalidate()
         if (flash != null) handler.postDelayed(refresh, (flashUntil - SystemClock.uptimeMillis()).coerceAtLeast(30L))
@@ -180,10 +221,11 @@ class NexoraOverlay(private val service: AccessibilityService) {
         val v = panel ?: return
         if (leaving) return
         leaving = true
-        v.animate().alpha(0f).scaleX(.25f).scaleY(.8f).setDuration(210).withEndAction { if (leaving) remove() }.start()
+        morph(v, dp(44f).toInt(), v.topHeight.toInt(), dismiss = true)
     }
     private fun remove() {
         leaving = false
+        geometry?.cancel(); geometry = null; targetWidth = 0; targetHeight = 0
         panel?.let { it.animate().cancel(); runCatching { wm.removeViewImmediate(it) } }
         panel = null; params = null
     }
@@ -232,11 +274,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         init { isClickable = true; contentDescription = "NEXORA live activity" }
         fun enter() {
             began = SystemClock.uptimeMillis()
-            animate().cancel()
-            pivotX = cameraX; pivotY = cameraY
-            alpha = 0f; scaleX = .32f; scaleY = .85f
-            animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(340)
-                .setInterpolator(PathInterpolator(.18f, .9f, .22f, 1f)).start()
+            invalidate()
         }
         private fun color(c: Int, a: Int = 255) { paint.color = c; paint.alpha = a; paint.style = Paint.Style.FILL; paint.shader = null }
         private fun text(canvas: Canvas, value: String, x: Float, y: Float, size: Float, col: Int, maxWidth: Float, bold: Boolean = false) {
@@ -251,14 +289,19 @@ class NexoraOverlay(private val service: AccessibilityService) {
             val w = width.toFloat(); val h = height.toFloat()
             val accent = card.accent
             val fade = (1f - age / 1.2f).coerceIn(0f,1f)
-            val inset = dp(2f)
+            val inset = dp(1f)
+            val expansion = ((h-topHeight)/dp(100f)).coerceIn(0f,1f)
+            val radius = min((h-2*inset)/2, dp(18f+10f*expansion)).coerceAtLeast(0f)
             rect.set(inset, inset, w-inset, h-inset)
-            color(Color.BLACK); canvas.drawRoundRect(rect, dp(if(open) 28f else 20f), dp(if(open) 28f else 20f), paint)
-            paint.style = Paint.Style.STROKE; paint.strokeWidth = dp(1f); paint.shader = LinearGradient(0f,0f,w,h, intArrayOf(accent,VIOLET,Color.TRANSPARENT),null,Shader.TileMode.CLAMP)
-            paint.alpha = (65 + 145*fade).toInt()
-            canvas.drawRoundRect(rect, dp(if(open) 28f else 20f), dp(if(open) 28f else 20f), paint)
-            paint.shader = null; paint.style = Paint.Style.FILL
-            val left = dp(15f)
+            color(Color.BLACK); canvas.drawRoundRect(rect, radius, radius, paint)
+            // No permanent neon border: a quiet graphite outline and a brief event accent.
+            color(Color.WHITE, 24); paint.style = Paint.Style.STROKE; paint.strokeWidth = dp(.65f)
+            canvas.drawRoundRect(rect, radius, radius, paint)
+            paint.style = Paint.Style.FILL
+            if (w < dp(108f)) { if(age<1.3f) postInvalidateOnAnimation(); return }
+            val contentAlpha = ((w-dp(108f))/dp(38f)).coerceIn(0f,1f)
+            canvas.saveLayerAlpha(0f,0f,w,h,(contentAlpha*255).toInt())
+            val left = dp(14f)
             val right = cameraX + cameraRadius + dp(9f)
             val cy = cameraY
             val maxRight = (w-right-dp(12f)).coerceAtLeast(0f)
@@ -278,7 +321,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 }
                 "connect" -> {
                     paint.style=Paint.Style.STROKE
-                    for(i in 1..3){paint.alpha=(80+175*((age*2f+i*.21f)%1f)).toInt();val r=dp(i*3f+3f);canvas.drawArc(iconX-r,cy-r,iconX+r,cy+r,215f,110f,false,paint)}
+                    for(i in 1..3){val reveal=((age-i*.075f)/.32f).coerceIn(0f,1f);paint.alpha=(reveal*255).toInt();val r=dp(i*3f+3f);canvas.drawArc(iconX-r,cy-r,iconX+r,cy+r,215f,110f,false,paint)}
                     paint.style=Paint.Style.FILL; paint.alpha=255;canvas.drawCircle(iconX,cy+dp(3f),dp(2f),paint)
                 }
                 "music" -> {
@@ -286,7 +329,13 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     if(art!=null) { val bitmap=art.asAndroidBitmap(); rect.set(left,cy-dp(11f),left+dp(22f),cy+dp(11f));canvas.save();path.reset();path.addRoundRect(rect,dp(6f),dp(6f),Path.Direction.CW);canvas.clipPath(path);color(Color.WHITE);canvas.drawBitmap(bitmap,null,rect,paint);canvas.restore() }
                     else for(i in 0..4){ val bar=dp(3f+13f*(.5f+.5f*sin(age*6+i*1.4f)));canvas.drawRoundRect(left+i*dp(5f),cy-bar/2,left+i*dp(5f)+dp(3f),cy+bar/2,dp(2f),dp(2f),paint) }
                 }
-                else -> { canvas.drawCircle(iconX,cy,dp(5f+3f*fade),paint);color(accent,70);canvas.drawCircle(iconX,cy,dp(11f+3f*fade),paint) }
+                else -> {
+                    val icon = card.appIcon
+                    if (icon != null) {
+                        icon.setBounds((iconX-dp(11f)).toInt(),(cy-dp(11f)).toInt(),(iconX+dp(11f)).toInt(),(cy+dp(11f)).toInt())
+                        icon.draw(canvas)
+                    } else { canvas.drawCircle(iconX,cy,dp(5f+2f*fade),paint);color(accent,48);canvas.drawCircle(iconX,cy,dp(10f+2f*fade),paint) }
+                }
             }
             val short = when(card.kind) {
                 "energy" -> card.detail.ifBlank { "Power" }
@@ -296,8 +345,17 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 "timer" -> "Timer"
                 else -> card.title
             }
-            text(canvas,short,right,cy+dp(4f),11f,accent,maxRight,true)
-            if(open) {
+            if (card.kind == "music") {
+                val playing = NowPlayingBus.state.value?.isPlaying == true
+                val waveX = w-dp(34f)
+                for(i in 0..4) {
+                    val bar = dp(if(playing) 4f+11f*(.5f+.5f*sin(age*5.5f+i*1.1f)) else 4f)
+                    color(if(i%2==0) BLUE else VIOLET)
+                    canvas.drawRoundRect(waveX+i*dp(4f),cy-bar/2,waveX+i*dp(4f)+dp(2.3f),cy+bar/2,dp(1.2f),dp(1.2f),paint)
+                }
+            } else text(canvas,short,right,cy+dp(4f),11f,if(card.kind=="message") Color.WHITE else accent,maxRight,true)
+            if(expansion > .15f) {
+                canvas.saveLayerAlpha(0f,topHeight,w,h,(((expansion-.15f)/.75f).coerceIn(0f,1f)*255).toInt())
                 val y=topHeight
                 text(canvas,card.title,left,y+dp(22f),17f,Color.WHITE,w-left*2,true)
                 var detail=card.detail
@@ -316,8 +374,10 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     val action=when(card.kind){"timer"->RunningTimerBus.state.value?.actions?.firstOrNull()?.title;"call"->callActions.firstOrNull()?.title;else->null}
                     text(canvas,action ?: if(card.intent!=null||card.key!=null) "Open  •  Swipe to switch" else "Swipe to switch",left,y+dp(74f),12f,accent,w-2*left)
                 }
-                for(i in 0 until min(count,8)){color(if(i==index) accent else Color.DKGRAY);canvas.drawCircle(w/2+(i-(min(count,8)-1)/2f)*dp(8f),h-dp(8f),dp(2f),paint)}
+                if(count>1) for(i in 0 until min(count,8)){color(if(i==index) accent else Color.DKGRAY);canvas.drawCircle(w/2+(i-(min(count,8)-1)/2f)*dp(8f),h-dp(8f),dp(2f),paint)}
+                canvas.restore()
             }
+            canvas.restore()
             if(age<1.3f || (card.kind=="music" && NowPlayingBus.state.value?.isPlaying==true)) postInvalidateOnAnimation()
         }
         override fun onTouchEvent(event: MotionEvent): Boolean {
