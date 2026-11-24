@@ -259,6 +259,29 @@ private fun SettingsList(
     ) {
         PageTitle(text = appName)
 
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            shape = RoundedCornerShape(28.dp),
+            colors = CardDefaults.cardColors(containerColor = androidx.compose.ui.graphics.Color(0xFF08090D)),
+        ) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("N E X O R A", color = androidx.compose.ui.graphics.Color(0xFF75BFFF),
+                    style = MaterialTheme.typography.headlineSmall)
+                Text("Beyond the Island", color = androidx.compose.ui.graphics.Color.White,
+                    style = MaterialTheme.typography.titleMedium)
+                Text("HYBRID  •  CONTROL CENTER", color = androidx.compose.ui.graphics.Color(0xFFB59AFF),
+                    style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.TextButton(onClick = onOpenDynamicTiles) { Text("Live activities", color = androidx.compose.ui.graphics.Color(0xFF75BFFF)) }
+                    androidx.compose.material3.TextButton(onClick = onOpenAnimation) { Text("Motion", color = androidx.compose.ui.graphics.Color(0xFFB59AFF)) }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.TextButton(onClick = onOpenSystemEvents) { Text("System events", color = androidx.compose.ui.graphics.Color(0xFF75BFFF)) }
+                    androidx.compose.material3.TextButton(onClick = onOpenShizuku) { Text("Shizuku", color = androidx.compose.ui.graphics.Color(0xFFB59AFF)) }
+                }
+            }
+        }
+
         // Accessibility access permission request if needed
         AnimatedVisibility(
             visible = !accessibilityAvailable,
