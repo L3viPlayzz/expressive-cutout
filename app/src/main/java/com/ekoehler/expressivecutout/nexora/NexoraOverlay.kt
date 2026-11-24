@@ -20,6 +20,11 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
 import kotlin.math.*
 
+/** Process-local only: calibration must never remain visible after leaving the screen. */
+internal object NexoraCalibration {
+    val mode = kotlinx.coroutines.flow.MutableStateFlow(0) // 0 off, 1 compact, 2 expanded, 3 charging
+}
+
 /** NEXORA Reborn: independent native Canvas renderer; only the event producers are shared. */
 class NexoraOverlay(private val service: AccessibilityService) {
     private val wm = requireNotNull(service.getSystemService(WindowManager::class.java))
@@ -47,6 +52,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private var targetWidth = 0
     private var targetHeight = 0
     private var centerX = 0
+    private var anchorX = 0
+    private var physicalY = 0f
+    private var anchorY = 0
     private var screenWidthPx = 0
     private val morphCurve = PathInterpolator(.22f, .8f, .24f, 1f)
     private val refresh = Runnable { render() }
@@ -118,6 +126,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 is CutoutSignal.Timer -> { timerIntent = signal.contentIntent; render() }
             }
         } }
+        scope.launch { NexoraCalibration.mode.collect { render() } }
         scope.launch { NowPlayingBus.state.collect { render() } }
         scope.launch { OnCallBus.state.collect { render() } }
         scope.launch { RunningTimerBus.state.collect { render() } }
@@ -136,6 +145,11 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private fun cards(): List<Card> {
         val result = mutableListOf<Card>()
         val locked = keyguard.isKeyguardLocked
+        val preview = NexoraCalibration.mode.value
+        if (!locked && preview != 0) return listOf(
+            if (preview == 3) Card("energy", "Charging", "84%", GREEN)
+            else Card("music", "Midnight Drive", "Now playing", VIOLET, progress = .60f)
+        )
         if (SystemClock.uptimeMillis() >= flashUntil) {
             if (flash != null && !browsing) expanded = false
             flash = null
@@ -169,7 +183,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 val t = a.animatedValue as Float
                 lp.width = (fromW + (w-fromW)*t).roundToInt().coerceAtLeast(1)
                 lp.height = (fromH + (h-fromH)*t).roundToInt().coerceAtLeast(1)
-                lp.x = (centerX - lp.width/2).coerceIn(0,(screenWidthPx-lp.width).coerceAtLeast(0))
+                lp.x = (anchorX - lp.width/2).coerceIn(0,(screenWidthPx-lp.width).coerceAtLeast(0))
+                lp.y = anchorY
+                v.cameraY = physicalY - lp.y
                 v.cameraX = (centerX-lp.x).toFloat()
                 v.alpha = if (dismiss) 1f-t else 1f
                 runCatching { wm.updateViewLayout(v,lp) }
@@ -188,7 +204,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
 
     private fun render() {
         handler.removeCallbacks(refresh)
-        if (!prefs.getBoolean("enabled", true) || !power.isInteractive || service.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_PORTRAIT) {
+        if ((!prefs.getBoolean("enabled", true) && NexoraCalibration.mode.value == 0) || !power.isInteractive || service.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_PORTRAIT) {
             flash = null; expanded = false; browsing = false; remove(); return
         }
         val all = cards()
@@ -202,38 +218,64 @@ class NexoraOverlay(private val service: AccessibilityService) {
         val screenWidth = metrics?.bounds?.width() ?: service.resources.displayMetrics.widthPixels
         val cutout = if (Build.VERSION.SDK_INT >= 30) metrics?.windowInsets?.displayCutout?.boundingRects?.firstOrNull { it.top <= dp(24f) && it.centerX() in (screenWidth / 4)..(screenWidth * 3 / 4) } else null
         val cameraX = cutout?.centerX() ?: screenWidth / 2
-        val topHeight = max(dp(36f).toInt(), (cutout?.bottom ?: 0) + dp(6f).toInt())
-        val width = min(screenWidth - dp(12f).toInt(), dp(if (expanded) 324f else if (next.kind == "music") 150f else if (next.kind == "energy") 180f else 194f).toInt())
-        val height = topHeight + if (expanded) dp(100f).toInt() else 0
+        val preview = NexoraCalibration.mode.value.takeUnless { keyguard.isKeyguardLocked } ?: 0
+        val isExpanded = if (preview != 0) preview == 2 else expanded
+        val scale = prefs.getInt("island_width",100).coerceIn(85,120)/100f
+        val requestedHeight = prefs.getInt("island_height",36).coerceIn(30,54)
+        val cameraRadius = max(dp(8f), (cutout?.width() ?: 0) / 2f + dp(3f))
+        physicalY = cutout?.centerY()?.toFloat() ?: dp(36f)*.46f
+        anchorY = dp(prefs.getInt("island_y",0).coerceIn(0,16).toFloat()).toInt()
+            .coerceAtMost((physicalY-cameraRadius-dp(1f)).toInt().coerceAtLeast(0))
+        val topHeight = max(dp(requestedHeight.toFloat()).toInt(), (cutout?.bottom ?: (physicalY+cameraRadius).toInt()) - anchorY + dp(6f).toInt())
+        val width = min(screenWidth - dp(12f).toInt(), dp((if (isExpanded) 324f else if (next.kind == "music") 150f else if (next.kind == "energy") 180f else 194f)*scale).toInt())
+        val height = topHeight + if (isExpanded) dp(100f).toInt() else 0
         centerX = cameraX
+        val maxOffset = (width/2f-cameraRadius-dp(44f)).coerceAtLeast(0f)
+        anchorX = cameraX + dp(prefs.getInt("island_x",0).coerceIn(-24,24).toFloat()).coerceIn(-maxOffset,maxOffset).toInt()
         screenWidthPx = screenWidth
-        val x = (cameraX - width / 2).coerceIn(0, (screenWidth-width).coerceAtLeast(0))
+        val x = (anchorX - width / 2).coerceIn(0, (screenWidth-width).coerceAtLeast(0))
         v.cameraX = (cameraX - (params?.x ?: x)).toFloat()
-        v.cameraY = cutout?.centerY()?.toFloat() ?: topHeight * .46f
-        v.cameraRadius = max(dp(8f), (cutout?.width() ?: 0) / 2f + dp(3f))
+        v.cameraY = physicalY - anchorY
+        v.cameraRadius = cameraRadius
         v.topHeight = topHeight.toFloat()
+        v.preview = preview != 0
         v.card = next
         v.count = all.size
         v.index = selection
-        v.open = expanded
+        v.open = isExpanded
         if (params == null) {
             val seed = min(width, max(dp(48f).toInt(), (v.cameraRadius * 2 + dp(12f)).toInt()))
             val lp = WindowManager.LayoutParams(seed, topHeight, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT)
             lp.gravity = Gravity.TOP or Gravity.LEFT
-            lp.x = (cameraX - seed / 2).coerceIn(0,(screenWidth-seed).coerceAtLeast(0))
+            lp.x = (anchorX - seed / 2).coerceIn(0,(screenWidth-seed).coerceAtLeast(0))
             v.cameraX = (cameraX - lp.x).toFloat()
-            lp.y = 0
+            lp.y = anchorY
             lp.layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= 30) WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             lp.title = "NEXORA"
             try { wm.addView(v, lp); params = lp; targetWidth = 0; targetHeight = 0; v.enter(); morph(v,width,height) } catch (_: Exception) { panel = null; params = null; return }
         } else {
             if (leaving) { leaving = false; geometry?.cancel(); targetWidth = 0; targetHeight = 0; v.alpha = 1f }
             if (changed) v.enter()
-            morph(v,width,height)
+            if (preview != 0) {
+                geometry?.cancel(); geometry = null
+                val lp = params ?: return
+                lp.width=width; lp.height=height; lp.x=x; lp.y=anchorY
+                v.cameraX=(centerX-x).toFloat(); v.cameraY=physicalY-anchorY
+                targetWidth=width; targetHeight=height
+                runCatching { wm.updateViewLayout(v,lp) }
+            } else {
+                // Position preferences can change without a size change.
+                val lp = params ?: return
+                if(targetWidth==width && targetHeight==height && (lp.x!=x || lp.y!=anchorY)) {
+                    targetWidth=0; targetHeight=0
+                }
+                morph(v,width,height)
+            }
         }
         v.invalidate()
+        if (preview != 0) return
         if (flash != null) handler.postDelayed(refresh, (flashUntil - SystemClock.uptimeMillis()).coerceAtLeast(30L))
         else handler.postDelayed(refresh, 1000)
     }
@@ -299,7 +341,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         private var downTime = 0L
         var cameraX = 0f; var cameraY = 0f; var cameraRadius = 0f; var topHeight = 0f
         var card = Card("system", "")
-        var count = 1; var index = 0; var open = false
+        var count = 1; var index = 0; var open = false; var preview = false
         init { isClickable = true; contentDescription = "NEXORA live activity" }
         fun enter() {
             began = SystemClock.uptimeMillis()
@@ -323,7 +365,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         }
         private fun album(canvas: Canvas,x: Float,y: Float,s: Float,r: Float) {
             rect.set(x,y,x+s,y+s)
-            val bitmap = NowPlayingBus.state.value?.albumArt?.asAndroidBitmap()
+            val bitmap = if(preview) null else NowPlayingBus.state.value?.albumArt?.asAndroidBitmap()
             if(bitmap==null) {
                 gradient(x,y,s,s)
                 canvas.drawRoundRect(rect,r,r,paint)
@@ -343,7 +385,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             color(Color.WHITE)
             paint.strokeCap=Paint.Cap.ROUND
             paint.strokeWidth=s*.13f
-            val paused=NowPlayingBus.state.value?.isPlaying!=true
+            val paused=!preview && NowPlayingBus.state.value?.isPlaying!=true
             if(kind==0 && !paused) {
                 canvas.drawLine(x-s*.22f,y-s*.43f,x-s*.22f,y+s*.43f,paint)
                 canvas.drawLine(x+s*.22f,y-s*.43f,x+s*.22f,y+s*.43f,paint)
@@ -363,7 +405,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 if(compactAlpha<.999f) canvas.saveLayerAlpha(0f,0f,w,h,(compactAlpha*255).toInt()) else canvas.save()
                 val s=min(dp(23.4f),(cameraX-cameraRadius-dp(19f)).coerceAtLeast(0f))
                 if(s>0f) album(canvas,dp(12f),cameraY-s/2,s,s*.26f)
-                val playing=NowPlayingBus.state.value?.isPlaying==true
+                val playing=preview || NowPlayingBus.state.value?.isPlaying==true
                 val waveW=dp(25f)
                 val start=max(cameraX+cameraRadius+dp(5f),w-dp(15f)-waveW)
                 if(start+waveW<w-dp(4f)) {
@@ -390,7 +432,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             val barY=y+dp(50f)
             color(0xFF292929.toInt())
             canvas.drawRoundRect(margin,barY,w-margin,barY+dp(3.5f),dp(1.75f),dp(1.75f),paint)
-            val progress=NowPlayingBus.state.value?.progress?.fractionAt(SystemClock.elapsedRealtime())
+            val progress=if(preview) .60f else NowPlayingBus.state.value?.progress?.fractionAt(SystemClock.elapsedRealtime())
             if(progress!=null && progress>0f) {
                 val end=margin+(w-2*margin)*progress
                 gradient(margin,barY,w-2*margin,0f)
@@ -420,7 +462,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             // Reference has a pure black silhouette without a visible outline.
             if(card.kind=="music") {
                 if(w>dp(105f)) musicLayout(canvas,w,h,expansion,age)
-                if(age<1.3f || NowPlayingBus.state.value?.isPlaying==true)postInvalidateOnAnimation()
+                if(preview || age<1.3f || NowPlayingBus.state.value?.isPlaying==true)postInvalidateOnAnimation()
                 return
             }
             if (w < dp(108f)) { if(age<1.3f) postInvalidateOnAnimation(); return }
@@ -490,6 +532,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             if(age<1.3f) postInvalidateOnAnimation()
         }
         override fun onTouchEvent(event: MotionEvent): Boolean {
+            if(preview) return true
             when(event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {downX=event.x;downY=event.y;downTime=SystemClock.uptimeMillis();return true}
                 MotionEvent.ACTION_UP -> {
