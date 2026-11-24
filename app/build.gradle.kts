@@ -21,11 +21,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.ekoehler.expressivecutout"
+        applicationId = "com.nexora.island"
         minSdk = 29
         targetSdk = 35
         versionCode = 8
-        versionName = "0.4.1-beta"
+        versionName = "1.0.0-beta"
     }
 
 	signingConfigs {
@@ -42,9 +42,6 @@ android {
 	}
 
     buildTypes {
-        getByName("debug") {
-            applicationIdSuffix = ".xtreme"
-        }
 		getByName("release") {
 			val releaseSigning = signingConfigs.getByName("release")
 			if (releaseSigning.storeFile != null) {
