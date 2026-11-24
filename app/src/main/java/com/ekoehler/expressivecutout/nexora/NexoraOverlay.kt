@@ -48,6 +48,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private var callIntent: PendingIntent? = null
     private var timerIntent: PendingIntent? = null
     private var callActions: List<CutoutSignal.Notification.Action> = emptyList()
+    private var wasRinging = false
+    private fun ringing() = OnCallBus.state.value?.ongoing == false
     private var current: Card? = null
     private var leaving = false
     private var geometry: ValueAnimator? = null
@@ -135,25 +137,39 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 }
                 is CutoutSignal.Call -> {
                     callIntent = signal.contentIntent; callActions = signal.actions
-                    openLive("call")
+                    if (!signal.ongoing) openLive("call") else render()
                 }
                 is CutoutSignal.Timer -> { timerIntent = signal.contentIntent; openLive("timer") }
             }
         } }
         scope.launch { NexoraCalibration.mode.collect { render() } }
         scope.launch { NowPlayingBus.state.collect { render() } }
-        scope.launch { OnCallBus.state.collect { if(it==null) { callActions=emptyList(); callIntent=null }; render() } }
+        scope.launch { OnCallBus.state.collect { call ->
+            val incoming = call?.ongoing == false
+            if (incoming && !wasRinging) {
+                flash=null; flashUntil=0L; browsing=false
+                expanded=true; autoCollapseAt=0L; autoFocus="call"
+            } else if (wasRinging && !incoming) {
+                expanded=false; autoCollapseAt=0L; browsing=false
+                autoFocus=if(call!=null)"call" else null
+                selection=0
+            }
+            wasRinging=incoming
+            if(call==null){callActions=emptyList();callIntent=null}
+            render()
+        } }
         scope.launch { RunningTimerBus.state.collect { render() } }
         scope.launch { DeviceLockBus.locked.collect { if (it) { flash = null; browsing = false; expanded = false; autoCollapseAt=0L; autoFocus=null }; render() } }
         scope.launch { NotificationInboxBus.items.collect { if (browsing) render() } }
         render()
     }
     private fun openLive(kind: String) {
+        if(ringing() && kind!="call")return
         flash=null; flashUntil=0L
         autoFocus=kind
         browsing=false
         expanded=true
-        autoCollapseAt=SystemClock.uptimeMillis()+EXPANDED_MS
+        autoCollapseAt=if(kind=="call" && ringing())0L else SystemClock.uptimeMillis()+EXPANDED_MS
         render()
     }
     private fun show(card: Card) {
@@ -178,7 +194,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             else Card("music", "Midnight Drive", "Now playing", VIOLET, progress = .60f)
         )
         val now=SystemClock.uptimeMillis()
-        if(autoCollapseAt!=0L && now>=autoCollapseAt){
+        if(!ringing() && autoCollapseAt!=0L && now>=autoCollapseAt){
             autoCollapseAt=0L; expanded=false
         }
         if(now>=flashUntil) flash=null
@@ -261,6 +277,10 @@ class NexoraOverlay(private val service: AccessibilityService) {
         autoFocus?.let { kind ->
             val position=all.indexOfFirst{it.kind==kind}
             if(position>=0) { selection=position; autoFocus=null }
+        }
+        if(ringing() && NexoraCalibration.mode.value==0) {
+            val callIndex=all.indexOfFirst{it.kind=="call"}
+            if(callIndex>=0){selection=callIndex; expanded=true; autoCollapseAt=0L; autoFocus=null; browsing=false}
         }
         selection = selection.coerceIn(0, all.lastIndex)
         val next = all[selection]
@@ -351,6 +371,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         remove()
     }
     private fun swipe(delta: Int) {
+        if(ringing())return
         autoCollapseAt=0L; autoFocus=null
         browsing = true
         val all = cards()
@@ -358,11 +379,27 @@ class NexoraOverlay(private val service: AccessibilityService) {
         expanded = true
         render()
     }
+    // Use the dialer's own action intents; never invent answer/decline actions.
+    private fun actionRole(title:String):Int {
+        val t=title.lowercase(java.util.Locale.ROOT)
+        return when {
+            listOf("decline","reject","hang up","end call","weigeren","afwijzen","ophangen","beëindigen").any{t.contains(it)} -> -1
+            listOf("answer","accept","opnemen","accepteren","beantwoorden").any{t.contains(it)} -> 1
+            else -> 0
+        }
+    }
+    private fun callButtons():List<CutoutSignal.Notification.Action> {
+        val actions=callActions.filter{it.reply==null}
+        return if(ringing()) actions.sortedBy{actionRole(it.title)}.let { sorted ->
+            val known=sorted.filter{actionRole(it.title)!=0}
+            (if(known.isNotEmpty())known else sorted).take(2)
+        } else actions.take(2)
+    }
     private fun tap(x: Float, y: Float) {
         val c = current ?: return
         autoCollapseAt=0L; autoFocus=null
         if (!expanded) { expanded = true; render(); return }
-        if (y < (panel?.topHeight ?: 0f)) { expanded = false; browsing = false; render(); return }
+        if (y < (panel?.topHeight ?: 0f)) { if(!ringing()){expanded = false; browsing = false; render()}; return }
         if (keyguard.isKeyguardLocked) return
         if (c.kind == "music" && y > (panel?.topHeight ?: 0f) + dp(58f)) {
             NowPlayingBus.state.value?.transport?.let {
@@ -372,7 +409,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         } else if (c.kind == "timer" && y > (panel?.topHeight ?: 0f) + dp(58f)) {
             RunningTimerBus.state.value?.actions?.firstOrNull()?.intent?.let { runCatching { it.send() } }
         } else if (c.kind == "call" && y > (panel?.topHeight ?: 0f) + dp(58f)) {
-            val actions=callActions.filter{it.reply==null}.take(2)
+            val actions=callButtons()
             val i=if(actions.size>1 && x>(panel?.visualWidth ?: 0f)/2f)1 else 0
             actions.getOrNull(i)?.intent?.let { runCatching { it.send() } }
         } else if (c.intent != null) runCatching { c.intent.send() }
@@ -539,6 +576,15 @@ class NexoraOverlay(private val service: AccessibilityService) {
             val iconX = if(card.kind=="energy") cameraX*.46f else left+dp(8f)
             color(accent); paint.strokeWidth = dp(2f); paint.strokeCap = Paint.Cap.ROUND
             when(card.kind) {
+                "call" -> {
+                    val photo=OnCallBus.state.value?.photo?.asAndroidBitmap()
+                    if(photo!=null && !keyguard.isKeyguardLocked){
+                        val s=dp(20f);rect.set(iconX-s/2,cy-s/2,iconX+s/2,cy+s/2)
+                        canvas.save();path.reset();path.addRoundRect(rect,s/2,s/2,Path.Direction.CW);canvas.clipPath(path);color(Color.WHITE);canvas.drawBitmap(photo,null,rect,paint);canvas.restore()
+                    } else {
+                        color(GREEN);paint.style=Paint.Style.STROKE;paint.strokeWidth=dp(2f);canvas.drawArc(iconX-dp(7f),cy-dp(7f),iconX+dp(7f),cy+dp(7f),85f,170f,false,paint);paint.style=Paint.Style.FILL
+                    }
+                }
                 "energy" -> {
                     val pulse=(age/.40f).coerceIn(0f,1f)
                     val settle=1f-(1f-pulse)*(1f-pulse)*(1f-pulse)
@@ -619,6 +665,10 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 text(canvas,card.title,left,y+dp(22f),17f,Color.WHITE,w-left*2,true)
                 var detail=card.detail
                 if(card.kind=="call" && OnCallBus.state.value?.ongoing==true) detail="Call in progress  •  $short"
+                if(card.kind=="call" && !keyguard.isKeyguardLocked) OnCallBus.state.value?.startTimeMs?.let { start ->
+                    val seconds=((System.currentTimeMillis()-start)/1000).coerceAtLeast(0)
+                    detail=String.format(java.util.Locale.ROOT,"%02d:%02d",seconds/60,seconds%60)
+                }
                 if(card.kind=="timer") RunningTimerBus.state.value?.let { t ->
                     val now=SystemClock.elapsedRealtime(); val ms=t.pausedRemainingMs ?: t.endElapsedRealtimeMs?.let { if(t.countsUp) now-it else it-now } ?: 0L
                     val secs=ms.coerceAtLeast(0)/1000;detail=String.format(java.util.Locale.ROOT,"%02d:%02d",secs/60,secs%60)
@@ -626,15 +676,16 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 text(canvas,detail,left,y+dp(42f),12f,Color.LTGRAY,w-left*2)
                 val progress=card.progress
                 if(progress!=null){color(Color.DKGRAY);canvas.drawRoundRect(left,y+dp(49f),w-left,y+dp(52f),dp(2f),dp(2f),paint);color(accent);canvas.drawRoundRect(left,y+dp(49f),left+(w-2*left)*progress.coerceIn(0f,1f),y+dp(52f),dp(2f),dp(2f),paint)}
-                val actions=if(card.kind=="call" && !keyguard.isKeyguardLocked) callActions.filter{it.reply==null}.take(2) else emptyList()
+                val actions=if(card.kind=="call" && !keyguard.isKeyguardLocked) callButtons() else emptyList()
                 if(actions.isNotEmpty()){
                     val gap=dp(8f)
                     val bw=(w-2*left-gap*(actions.size-1))/actions.size
                     actions.forEachIndexed{i,action->
                         val bx=left+i*(bw+gap)
-                        color(0xFF24262A.toInt())
-                        canvas.drawRoundRect(bx,y+dp(59f),bx+bw,y+dp(85f),dp(13f),dp(13f),paint)
-                        text(canvas,action.title,bx+dp(10f),y+dp(76f),12f,Color.WHITE,bw-dp(20f),true)
+                        val role=actionRole(action.title)
+                        color(when(role){-1->0xFFCD354A.toInt();1->0xFF238C56.toInt();else->0xFF24262A.toInt()})
+                        canvas.drawRoundRect(bx,y+dp(57f),bx+bw,y+dp(89f),dp(16f),dp(16f),paint)
+                        text(canvas,action.title,bx+dp(10f),y+dp(77f),12f,Color.WHITE,bw-dp(20f),true)
                     }
                 } else {
                     val action=if(card.kind=="timer")RunningTimerBus.state.value?.actions?.firstOrNull()?.title else null
@@ -655,8 +706,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     val dx=event.x-downX;val dy=event.y-downY
                     when {
                         abs(dx)>dp(35f) && abs(dx)>abs(dy) -> swipe(if(dx<0) 1 else -1)
-                        dy < -dp(25f) -> {flash=null;expanded=false;browsing=false;selection=0;autoCollapseAt=0L;autoFocus=null;render()}
-                        SystemClock.uptimeMillis()-downTime>500 -> {browsing=true;expanded=true;autoCollapseAt=0L;autoFocus=null;render()}
+                        dy < -dp(25f) -> {if(!ringing()){flash=null;expanded=false;browsing=false;selection=0;autoCollapseAt=0L;autoFocus=null;render()}}
+                        SystemClock.uptimeMillis()-downTime>500 -> {if(!ringing()){browsing=true;expanded=true;autoCollapseAt=0L;autoFocus=null;render()}}
                         else -> {performClick();tap(event.x-drawX,event.y-drawY)}
                     }
                     return true
