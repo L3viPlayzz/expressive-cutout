@@ -44,7 +44,7 @@
         android:theme="@style/Theme.ExpressiveCutout">
 
         <activity
-            android:name=".MainActivity"
+            android:name=".nexora.NexoraActivity"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.ExpressiveCutout">
@@ -53,6 +53,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".MainActivity" android:exported="false" android:theme="@style/Theme.ExpressiveCutout" />
 
         <!-- Shizuku's own initialisation hook: it binds this provider to hand our process the
              privileged binder. Required by the Shizuku API, not something we call ourselves. -->
