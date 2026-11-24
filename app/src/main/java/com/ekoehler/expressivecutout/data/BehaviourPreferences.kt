@@ -289,7 +289,7 @@ class BehaviourPreferences(private val context: Context) : JsonSerializable {
             /** If enabled, haptic feedback fires when the cutout appears and disappears */
             hapticsOnPop = prefs[HAPTICS_ON_POP] ?: BehaviourSettings.DEFAULT_HAPTICS_ON_POP,
             /** If enabled, remove Android notification pop-ups */
-            dismissNotifications = prefs[DISMISS_NOTIFICATIONS] ?: BehaviourSettings.DEFAULT_DISMISS_NOTIFICATIONS,
+            dismissNotifications = false, // Reborn never holds real notifications.
             /** If enabled, notification cutout appears even when Do not disturb is enabled */
             displayWhileDnd = prefs[DISPLAY_WHILE_DND] ?: BehaviourSettings.DEFAULT_DISPLAY_WHILE_DND,
             /** If enabled, the island rings/vibrates itself when a new notification surfaces */
