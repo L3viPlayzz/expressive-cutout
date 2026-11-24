@@ -130,7 +130,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         flashUntil = SystemClock.uptimeMillis() + 4000
         selection = 0
         browsing = false
-        expanded = true
+        expanded = card.kind == "message"
         render()
     }
     private fun cards(): List<Card> {
@@ -203,7 +203,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         val cutout = if (Build.VERSION.SDK_INT >= 30) metrics?.windowInsets?.displayCutout?.boundingRects?.firstOrNull { it.top <= dp(24f) && it.centerX() in (screenWidth / 4)..(screenWidth * 3 / 4) } else null
         val cameraX = cutout?.centerX() ?: screenWidth / 2
         val topHeight = max(dp(36f).toInt(), (cutout?.bottom ?: 0) + dp(6f).toInt())
-        val width = min(screenWidth - dp(12f).toInt(), dp(if (expanded) 324f else if (next.kind == "music") 152f else 194f).toInt())
+        val width = min(screenWidth - dp(12f).toInt(), dp(if (expanded) 324f else if (next.kind == "music") 150f else if (next.kind == "energy") 180f else 194f).toInt())
         val height = topHeight + if (expanded) dp(100f).toInt() else 0
         centerX = cameraX
         screenWidthPx = screenWidth
@@ -273,7 +273,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         if (c.kind == "music" && y > (panel?.topHeight ?: 0f) + dp(58f)) {
             NowPlayingBus.state.value?.transport?.let {
                 val fraction = x / (panel?.width?.toFloat() ?: 1f)
-                when { fraction < .34f -> it.previous(); fraction > .66f -> it.next(); else -> it.playPause() }
+                when { fraction < .415f -> it.previous(); fraction > .585f -> it.next(); else -> it.playPause() }
             }
         } else if (c.kind == "timer" && y > (panel?.topHeight ?: 0f) + dp(58f)) {
             RunningTimerBus.state.value?.actions?.firstOrNull()?.intent?.let { runCatching { it.send() } }
@@ -288,7 +288,10 @@ class NexoraOverlay(private val service: AccessibilityService) {
         private val rect = RectF()
         private val path = Path()
         private val normalTypeface = Typeface.create("sans-serif", Typeface.NORMAL)
-        private val mediumTypeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        private val mediumTypeface = Typeface.create("sans-serif", Typeface.BOLD)
+        private val textPaint = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG)
+        private val signature = LinearGradient(0f,0f,1f,1f,0xFF75BFFF.toInt(),0xFFB59AFF.toInt(),Shader.TileMode.CLAMP)
+        private val gradientMatrix = Matrix()
         private var began = SystemClock.uptimeMillis()
         private var downX = 0f; private var downY = 0f
         private var downTime = 0L
@@ -304,8 +307,103 @@ class NexoraOverlay(private val service: AccessibilityService) {
         private fun text(canvas: Canvas, value: String, x: Float, y: Float, size: Float, col: Int, maxWidth: Float, bold: Boolean = false) {
             if (maxWidth <= 0f) return
             color(col); paint.textSize = dp(size); paint.typeface = if (bold) mediumTypeface else normalTypeface
-            val line = android.text.TextUtils.ellipsize(value.replace('\n', ' '), android.text.TextPaint(paint), maxWidth, android.text.TextUtils.TruncateAt.END)
+            val line = android.text.TextUtils.ellipsize(value.replace('\n', ' '), textPaint.apply { set(paint) }, maxWidth, android.text.TextUtils.TruncateAt.END)
             canvas.drawText(line.toString(), x, y, paint)
+        }
+        // Reference layout: 122:31 compact and 264:105 expanded. Camera stays in physical coordinates.
+        private fun gradient(x: Float, y: Float, w: Float, h: Float) {
+            color(Color.WHITE)
+            gradientMatrix.reset()
+            gradientMatrix.setScale(w.coerceAtLeast(1f),h.coerceAtLeast(1f))
+            gradientMatrix.postTranslate(x,y)
+            signature.setLocalMatrix(gradientMatrix)
+            paint.shader = signature
+        }
+        private fun album(canvas: Canvas,x: Float,y: Float,s: Float,r: Float) {
+            rect.set(x,y,x+s,y+s)
+            val bitmap = NowPlayingBus.state.value?.albumArt?.asAndroidBitmap()
+            if(bitmap==null) {
+                gradient(x,y,s,s)
+                canvas.drawRoundRect(rect,r,r,paint)
+                paint.shader=null
+            } else {
+                color(Color.WHITE)
+                paint.isFilterBitmap=true
+                canvas.save()
+                path.reset(); path.addRoundRect(rect,r,r,Path.Direction.CW);canvas.clipPath(path)
+                val side=min(bitmap.width,bitmap.height)
+                val src=Rect((bitmap.width-side)/2,(bitmap.height-side)/2,(bitmap.width+side)/2,(bitmap.height+side)/2)
+                canvas.drawBitmap(bitmap,src,rect,paint)
+                canvas.restore()
+            }
+        }
+        private fun transport(canvas: Canvas,x: Float,y: Float,kind: Int,s: Float) {
+            color(Color.WHITE)
+            paint.strokeCap=Paint.Cap.ROUND
+            paint.strokeWidth=s*.13f
+            val paused=NowPlayingBus.state.value?.isPlaying!=true
+            if(kind==0 && !paused) {
+                canvas.drawLine(x-s*.22f,y-s*.43f,x-s*.22f,y+s*.43f,paint)
+                canvas.drawLine(x+s*.22f,y-s*.43f,x+s*.22f,y+s*.43f,paint)
+            } else {
+                val dir=if(kind<0) -1f else 1f
+                path.reset()
+                path.moveTo(x-dir*s*.30f,y-s*.48f)
+                path.lineTo(x+dir*s*.43f,y)
+                path.lineTo(x-dir*s*.30f,y+s*.48f)
+                path.close();canvas.drawPath(path,paint)
+                if(kind!=0)canvas.drawLine(x+dir*s*.52f,y-s*.43f,x+dir*s*.52f,y+s*.43f,paint)
+            }
+        }
+        private fun musicLayout(canvas: Canvas,w:Float,h:Float,expansion:Float,age:Float) {
+            val compactAlpha=(1f-expansion*2.5f).coerceIn(0f,1f)
+            if(compactAlpha>0f) {
+                canvas.saveLayerAlpha(0f,0f,w,h,(compactAlpha*255).toInt())
+                val s=min(dp(23.4f),(cameraX-cameraRadius-dp(19f)).coerceAtLeast(0f))
+                if(s>0f) album(canvas,dp(12f),cameraY-s/2,s,s*.26f)
+                val playing=NowPlayingBus.state.value?.isPlaying==true
+                val waveW=dp(25f)
+                val start=max(cameraX+cameraRadius+dp(5f),w-dp(15f)-waveW)
+                if(start+waveW<w-dp(4f)) {
+                    val heights=floatArrayOf(8f,16f,23f,15f,7f)
+                    for(i in 0..4) {
+                        val bar=dp(if(playing) heights[i]*(.78f+.22f*sin(age*5.2f+i*1.3f)) else 5f)
+                        val bx=start+i*dp(5.2f)
+                        gradient(bx,cameraY-bar/2,dp(3f),bar)
+                        canvas.drawRoundRect(bx,cameraY-bar/2,bx+dp(3f),cameraY+bar/2,dp(1.5f),dp(1.5f),paint)
+                    }
+                }
+                canvas.restore()
+            }
+            val a=((expansion-.12f)/.78f).coerceIn(0f,1f)
+            if(a<=0f)return
+            canvas.saveLayerAlpha(0f,0f,w,h,(a*255).toInt())
+            val y=topHeight
+            val margin=dp(21f)
+            val art=dp(43f)
+            val artY=y-dp(5f)
+            album(canvas,margin,artY,art,dp(10f))
+            val tx=margin+art+dp(14f)
+            text(canvas,card.title,tx,artY+dp(16f),15f,Color.WHITE,w-tx-margin,true)
+            text(canvas,card.detail.ifBlank{"Now playing"},tx,artY+dp(34f),12f,0xFF9DA1AA.toInt(),w-tx-margin)
+            val barY=y+dp(50f)
+            color(0xFF292929.toInt())
+            canvas.drawRoundRect(margin,barY,w-margin,barY+dp(3.5f),dp(1.75f),dp(1.75f),paint)
+            val progress=NowPlayingBus.state.value?.progress?.fractionAt(SystemClock.elapsedRealtime())
+            if(progress!=null && progress>0f) {
+                val end=margin+(w-2*margin)*progress
+                gradient(margin,barY,w-2*margin,0f)
+                canvas.drawRoundRect(margin,barY,end,barY+dp(3.5f),dp(1.75f),dp(1.75f),paint)
+            }
+            val buttonsY=y+dp(73f)
+            transport(canvas,w*.34f,buttonsY,-1,dp(18f))
+            transport(canvas,w*.50f,buttonsY,0,dp(18f))
+            transport(canvas,w*.66f,buttonsY,1,dp(18f))
+            if(count>1) for(i in 0 until min(count,8)) {
+                color(if(i==index) VIOLET else 0xFF333333.toInt())
+                canvas.drawCircle(w/2+(i-(min(count,8)-1)/2f)*dp(8f),y+dp(92f),dp(1.7f),paint)
+            }
+            canvas.restore()
         }
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
@@ -315,13 +413,15 @@ class NexoraOverlay(private val service: AccessibilityService) {
             val fade = (1f - age / 1.2f).coerceIn(0f,1f)
             val inset = dp(1f)
             val expansion = ((h-topHeight)/dp(100f)).coerceIn(0f,1f)
-            val radius = min((h-2*inset)/2, dp(18f+10f*expansion)).coerceAtLeast(0f)
+            val radius = ((topHeight-2*inset)/2*(1f-expansion)+dp(31f)*expansion).coerceIn(0f, max(0f,(h-2*inset)/2))
             rect.set(inset, inset, w-inset, h-inset)
             color(Color.BLACK); canvas.drawRoundRect(rect, radius, radius, paint)
-            // No permanent neon border: a quiet graphite outline and a brief event accent.
-            color(Color.WHITE, 24); paint.style = Paint.Style.STROKE; paint.strokeWidth = dp(.65f)
-            canvas.drawRoundRect(rect, radius, radius, paint)
-            paint.style = Paint.Style.FILL
+            // Reference has a pure black silhouette without a visible outline.
+            if(card.kind=="music") {
+                if(w>dp(105f)) musicLayout(canvas,w,h,expansion,age)
+                if(age<1.3f || NowPlayingBus.state.value?.isPlaying==true)postInvalidateOnAnimation()
+                return
+            }
             if (w < dp(108f)) { if(age<1.3f) postInvalidateOnAnimation(); return }
             val contentAlpha = ((w-dp(108f))/dp(38f)).coerceIn(0f,1f)
             if (contentAlpha < .999f) canvas.saveLayerAlpha(0f,0f,w,h,(contentAlpha*255).toInt()) else canvas.save()
@@ -329,12 +429,12 @@ class NexoraOverlay(private val service: AccessibilityService) {
             val right = cameraX + cameraRadius + dp(9f)
             val cy = cameraY
             val maxRight = (w-right-dp(12f)).coerceAtLeast(0f)
-            val iconX = left + dp(10f)
+            val iconX = if(card.kind=="energy") cameraX*.34f else left+dp(10f)
             color(accent); paint.strokeWidth = dp(2f); paint.strokeCap = Paint.Cap.ROUND
             when(card.kind) {
                 "energy" -> {
                     path.reset(); path.moveTo(iconX+dp(2f),cy-dp(10f));path.lineTo(iconX-dp(6f),cy+dp(1f));path.lineTo(iconX,cy+dp(1f));path.lineTo(iconX-dp(2f),cy+dp(10f));path.lineTo(iconX+dp(7f),cy-dp(2f));path.lineTo(iconX+dp(1f),cy-dp(2f));path.close();canvas.drawPath(path,paint)
-                    color(accent, (fade*180).toInt()); canvas.drawRoundRect(left, topHeight-dp(5f), left+(w-2*left)*(1f-fade),topHeight-dp(3f),dp(2f),dp(2f),paint)
+                    // Compact charge card: only the lightning glyph and true battery level.
                 }
                 "unlock","lock" -> {
                     paint.style=Paint.Style.STROKE
@@ -377,6 +477,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     color(if(i%2==0) BLUE else VIOLET)
                     canvas.drawRoundRect(waveX+i*dp(4f),cy-bar/2,waveX+i*dp(4f)+dp(2.3f),cy+bar/2,dp(1.2f),dp(1.2f),paint)
                 }
+            } else if (card.kind == "energy") {
+                val labelX=max(right,cameraX+(w-cameraX)*.32f)
+                text(canvas,short,labelX,cy+dp(5f),14f,accent,w-labelX-dp(8f),true)
             } else if (card.kind != "music") text(canvas,short,right,cy+dp(4f),11f,if(card.kind=="message") Color.WHITE else accent,maxRight,true)
             if(expansion > .15f) {
                 if (expansion < .90f) canvas.saveLayerAlpha(0f,topHeight,w,h,(((expansion-.15f)/.75f).coerceIn(0f,1f)*255).toInt()) else canvas.save()
