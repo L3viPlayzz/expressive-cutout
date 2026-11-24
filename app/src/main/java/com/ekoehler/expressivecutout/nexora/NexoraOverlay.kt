@@ -41,8 +41,6 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private var flashUntil = 0L
     private var autoCollapseAt = 0L
     private var autoFocus: String? = null
-    private var lastCallKey: String? = null
-    private var lastCallOngoing: Boolean? = null
     private var selection = 0
     private var expanded = false
     private var browsing = false
@@ -137,7 +135,6 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 }
                 is CutoutSignal.Call -> {
                     callIntent = signal.contentIntent; callActions = signal.actions
-                    lastCallKey = signal.key; lastCallOngoing = signal.ongoing
                     openLive("call")
                 }
                 is CutoutSignal.Timer -> { timerIntent = signal.contentIntent; openLive("timer") }
@@ -145,7 +142,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         } }
         scope.launch { NexoraCalibration.mode.collect { render() } }
         scope.launch { NowPlayingBus.state.collect { render() } }
-        scope.launch { OnCallBus.state.collect { if(it==null) { callActions=emptyList(); callIntent=null; lastCallKey=null; lastCallOngoing=null }; render() } }
+        scope.launch { OnCallBus.state.collect { if(it==null) { callActions=emptyList(); callIntent=null }; render() } }
         scope.launch { RunningTimerBus.state.collect { render() } }
         scope.launch { DeviceLockBus.locked.collect { if (it) { flash = null; browsing = false; expanded = false; autoCollapseAt=0L; autoFocus=null }; render() } }
         scope.launch { NotificationInboxBus.items.collect { if (browsing) render() } }
@@ -375,7 +372,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
         } else if (c.kind == "timer" && y > (panel?.topHeight ?: 0f) + dp(58f)) {
             RunningTimerBus.state.value?.actions?.firstOrNull()?.intent?.let { runCatching { it.send() } }
         } else if (c.kind == "call" && y > (panel?.topHeight ?: 0f) + dp(58f)) {
-            callActions.firstOrNull()?.intent?.let { runCatching { it.send() } }
+            val actions=callActions.filter{it.reply==null}.take(2)
+            val i=if(actions.size>1 && x>(panel?.visualWidth ?: 0f)/2f)1 else 0
+            actions.getOrNull(i)?.intent?.let { runCatching { it.send() } }
         } else if (c.intent != null) runCatching { c.intent.send() }
         else if (c.key != null) CutoutNotificationListenerService.openFromInbox(c.key)
         else { expanded = false; render() }
@@ -582,7 +581,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     val icon = card.appIcon
                     if (icon != null) {
                         icon.setBounds((iconX-dp(11f)).toInt(),(cy-dp(11f)).toInt(),(iconX+dp(11f)).toInt(),(cy+dp(11f)).toInt())
-                        icon.draw(canvas)
+                        val reveal=(age/.28f).coerceIn(0f,1f)
+                    val eased=1f-(1f-reveal)*(1f-reveal)*(1f-reveal)
+                    canvas.save();canvas.scale(.82f+.18f*eased,.82f+.18f*eased,iconX,cy);icon.draw(canvas);canvas.restore()
                     } else { canvas.drawCircle(iconX,cy,dp(5f+2f*fade),paint);color(accent,48);canvas.drawCircle(iconX,cy,dp(10f+2f*fade),paint) }
                 }
             }
@@ -611,7 +612,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 text(canvas,short,labelX,cy+dp(5f),14f,accent,w-labelX-dp(8f),true)
             } else text(canvas,short,right,cy+dp(4f),11f,if(card.kind=="message") Color.WHITE else accent,maxRight,true)
             if(expansion > .15f) {
-                if (expansion < .90f) canvas.saveLayerAlpha(0f,topHeight,w,h,(((expansion-.15f)/.75f).coerceIn(0f,1f)*255).toInt()) else canvas.save()
+                val reveal=((expansion-.15f)/.75f).coerceIn(0f,1f)
+                if (expansion < .90f) canvas.saveLayerAlpha(0f,topHeight,w,h,(reveal*255).toInt()) else canvas.save()
+                canvas.translate(0f,dp(8f)*(1f-reveal))
                 val y=topHeight
                 text(canvas,card.title,left,y+dp(22f),17f,Color.WHITE,w-left*2,true)
                 var detail=card.detail
@@ -623,8 +626,20 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 text(canvas,detail,left,y+dp(42f),12f,Color.LTGRAY,w-left*2)
                 val progress=card.progress
                 if(progress!=null){color(Color.DKGRAY);canvas.drawRoundRect(left,y+dp(49f),w-left,y+dp(52f),dp(2f),dp(2f),paint);color(accent);canvas.drawRoundRect(left,y+dp(49f),left+(w-2*left)*progress.coerceIn(0f,1f),y+dp(52f),dp(2f),dp(2f),paint)}
-                val action=when(card.kind){"timer"->RunningTimerBus.state.value?.actions?.firstOrNull()?.title;"call"->callActions.firstOrNull()?.title;else->null}
-                text(canvas,action ?: if(card.intent!=null||card.key!=null) "Open  •  Swipe to switch" else "Swipe to switch",left,y+dp(74f),12f,accent,w-2*left)
+                val actions=if(card.kind=="call" && !keyguard.isKeyguardLocked) callActions.filter{it.reply==null}.take(2) else emptyList()
+                if(actions.isNotEmpty()){
+                    val gap=dp(8f)
+                    val bw=(w-2*left-gap*(actions.size-1))/actions.size
+                    actions.forEachIndexed{i,action->
+                        val bx=left+i*(bw+gap)
+                        color(0xFF24262A.toInt())
+                        canvas.drawRoundRect(bx,y+dp(59f),bx+bw,y+dp(85f),dp(13f),dp(13f),paint)
+                        text(canvas,action.title,bx+dp(10f),y+dp(76f),12f,Color.WHITE,bw-dp(20f),true)
+                    }
+                } else {
+                    val action=if(card.kind=="timer")RunningTimerBus.state.value?.actions?.firstOrNull()?.title else null
+                    text(canvas,action ?: if(card.intent!=null||card.key!=null) "Open  •  Swipe to switch" else if(keyguard.isKeyguardLocked && card.kind=="call") "Unlock to manage call" else "Swipe to switch",left,y+dp(74f),12f,accent,w-2*left)
+                }
                 if(count>1) for(i in 0 until min(count,8)){color(if(i==index) accent else Color.DKGRAY);canvas.drawCircle(w/2+(i-(min(count,8)-1)/2f)*dp(8f),h-dp(8f),dp(2f),paint)}
                 canvas.restore()
             }
