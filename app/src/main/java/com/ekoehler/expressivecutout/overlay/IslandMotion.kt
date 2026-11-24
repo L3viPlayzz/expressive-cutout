@@ -159,13 +159,13 @@ internal class IslandMotion(
          * animation is expressed relative to this, so the duration slider scales them in
          * proportion.
          */
-        const val BASE_TRANSITION_MS = 220
+        const val BASE_TRANSITION_MS = 280
 
         /**
          * Standard ease-in-out — cubic-bezier(0.42, 0.0, 0.58, 1.0) — for
          * AnimationStyle.EASE_IN_OUT.
          */
-        private val EaseInOutEasing = CubicBezierEasing(0.42f, 0f, 0.58f, 1f)
+        private val EaseInOutEasing = CubicBezierEasing(0.22f, 0.75f, 0.25f, 1f)
 
         /**
          * The island's resting scale, i.e. the one the boop and the pop depart from and return to.
@@ -176,7 +176,7 @@ internal class IslandMotion(
          * Damping for [pop]'s single-arc swell. Loose enough that the spring actually overshoots,
          * tight enough that it settles in one swing rather than wobbling.
          */
-        private const val POP_DAMPING = 0.55f
+        private const val POP_DAMPING = 0.72f
 
         /** Damping for [dpFirm]: ~0.15% overshoot, well under a dp at cutout scale. */
         private const val FIRM_DAMPING = 0.9f
@@ -186,7 +186,7 @@ internal class IslandMotion(
          * exp(-z * atan(sqrt(1 - z^2) / z) / sqrt(1 - z^2)), evaluated at z = POP_DAMPING. Keep in
          * step with POP_DAMPING — it is only correct for that value.
          */
-        private const val POP_PEAK_RATIO = 0.5216f
+        private const val POP_PEAK_RATIO = 0.451239f
 
         /**
          * Where [popIn] starts from. The badge is small enough on the pill that the growth has to be
@@ -216,9 +216,9 @@ internal class IslandMotion(
         ): SpringSpec<T> {
             val stiffness = spatialStiffness(speed)
             val dampingRatio = when (bounce) {
-                AnimationBounce.BIG -> 0.45f
-                AnimationBounce.NORMAL -> 0.6f
-                AnimationBounce.SMALL -> 0.8f
+                AnimationBounce.BIG -> 0.65f
+                AnimationBounce.NORMAL -> 0.82f
+                AnimationBounce.SMALL -> 0.95f
             }
             return spring(dampingRatio = dampingRatio, stiffness = stiffness, visibilityThreshold = visibilityThreshold)
         }
@@ -226,7 +226,7 @@ internal class IslandMotion(
         /** The MotionScheme slow / default / fast stiffness tokens, shared by the spatial springs. */
         private fun spatialStiffness(speed: AnimationSpeed): Float = when (speed) {
             AnimationSpeed.SLOW -> 170f
-            AnimationSpeed.DEFAULT -> 380f
+            AnimationSpeed.DEFAULT -> 460f
             AnimationSpeed.FAST -> 800f
         }
 
