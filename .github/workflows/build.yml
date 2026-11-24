@@ -3,9 +3,9 @@ name: Build
 
 on:
   push:
-    branches: [main, dev, xtreme-v1]
+    branches: [main, dev, xtreme-v1, nexora-reborn]
   pull_request:
-    branches: [main, dev, xtreme-v1]
+    branches: [main, dev, xtreme-v1, nexora-reborn]
   workflow_dispatch:
 
 concurrency:
