@@ -4,6 +4,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NexoraPolicyTest {
+    @Test fun inboxPagesNeverExposeEmptyPage() {
+        assertEquals(0,NexoraPolicy.inboxPages(0))
+        assertEquals(1,NexoraPolicy.inboxPages(3))
+        assertEquals(2,NexoraPolicy.inboxPages(4))
+        assertEquals(34,NexoraPolicy.inboxPages(100))
+        assertEquals(0,NexoraPolicy.inboxPage(9,0))
+        assertEquals(1,NexoraPolicy.inboxPage(9,4))
+        assertEquals(0,NexoraPolicy.inboxPage(-1,4))
+    }
     @Test fun foregroundIntegrationAndShadeGesture() {
         assertTrue(NexoraPolicy.hideDuplicate(true,"player","player"))
         assertFalse(NexoraPolicy.hideDuplicate(false,"player","player"))

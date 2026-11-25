@@ -82,6 +82,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                         else if(dy>dp(32f) && dy>abs(dx))service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS)
                         true
                     }
+                    MotionEvent.ACTION_CANCEL->true
                     else->true
                 }
             }
@@ -169,7 +170,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private fun displayAwake():Boolean = NexoraPolicy.canDraw(power.isInteractive, displayManager?.getDisplay(Display.DEFAULT_DISPLAY)?.state == Display.STATE_ON)
     private val displayListener = object:android.hardware.display.DisplayManager.DisplayListener {
         override fun onDisplayAdded(id:Int)=Unit
-        override fun onDisplayRemoved(id:Int){if(id==Display.DEFAULT_DISPLAY)remove()}
+        override fun onDisplayRemoved(id:Int){if(id==Display.DEFAULT_DISPLAY){removeNotch();remove()}}
         override fun onDisplayChanged(id:Int){
             if(id==Display.DEFAULT_DISPLAY) {
                 if(!displayAwake()) { displayVisible=false; handler.removeCallbacks(refresh); removeNotch();remove() }
@@ -336,7 +337,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         render()
     }
     private fun openLive(kind: String) {
-        if(ringing() && kind!="call")return
+        if((ringing() || inboxOpen) && kind!="call"){scheduleRender();return}
         inboxOpen=false;flash=null; flashUntil=0L; hub=false
         autoFocus=kind
         browsing=false
@@ -397,9 +398,10 @@ class NexoraOverlay(private val service: AccessibilityService) {
             OnCallBus.state.value?.let { result.add(Card("call",if(it.ongoing)"On call" else "Incoming call",if(it.ongoing)"Call in progress" else "Unlock to view",GREEN)) }
             return result
         }
+        if(ringing())inboxOpen=false
         inboxRows=if(inboxOpen)eligibleInbox()else emptyList()
         if(inboxOpen && inboxRows.isNotEmpty()){
-            inboxPage=inboxPage.coerceIn(0,(inboxRows.size-1)/3)
+            inboxPage=NexoraPolicy.inboxPage(inboxPage,inboxRows.size)
             return listOf(Card("inbox","Notifications","",VIOLET))
         }
         if(inboxOpen){inboxOpen=false;expanded=false}
@@ -596,7 +598,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             }
         }
         v.invalidate()
-        if (preview != 0) return
+        if (preview != 0 || inboxOpen) return
         val now=SystemClock.uptimeMillis()
         val nextDeadline=listOf(autoCollapseAt,if(flash!=null)flashUntil else 0L).filter{it>now}.minOrNull()
         handler.postDelayed(refresh, min(1000L,(nextDeadline?.minus(now) ?: 1000L).coerceAtLeast(1L)))
@@ -629,7 +631,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
     }
     private fun swipe(delta: Int) {
         if(ringing())return
-        if(inboxOpen){inboxPage=(inboxPage+delta).coerceIn(0,((inboxRows.size-1)/3).coerceAtLeast(0));panel?.invalidate();return}
+        if(inboxOpen){inboxPage=NexoraPolicy.inboxPage(inboxPage+delta,inboxRows.size);panel?.invalidate();return}
         if(!enabled("swipe_switch"))return
         autoCollapseAt=0L; autoFocus=null
         browsing = enabled("inbox")
@@ -1141,7 +1143,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             if(a<.999f)canvas.saveLayerAlpha(0f,topHeight,w,h,(a*255).toInt())else canvas.save()
             val y=topHeight;val l=dp(16f);val r=w-l
             text(canvas,"Notifications",l,y+dp(18f),15f,Color.WHITE,w-dp(95f),true)
-            val pages=(inboxRows.size+2)/3
+            val pages=NexoraPolicy.inboxPages(inboxRows.size)
             text(canvas,"${inboxPage+1}/$pages",r-dp(38f),y+dp(18f),11f,VIOLET,dp(38f),true)
             for(row in 0..2){
                 val item=inboxRows.getOrNull(inboxPage*3+row) ?: break

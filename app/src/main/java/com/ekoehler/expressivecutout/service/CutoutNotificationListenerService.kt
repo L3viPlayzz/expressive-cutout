@@ -722,7 +722,7 @@ class CutoutNotificationListenerService : NotificationListenerService() {
             nonSilent = surfaced.count { !isSilentNotification(it, rankingMap) },
         )
         NotificationInboxBus.update(
-            surfaced.sortedByDescending { it.postTime }.take(MAX_INBOX_ENTRIES).map { sbn ->
+            surfaced.sortedByDescending { it.postTime }.map { sbn ->
                 InboxNotification(
                     key = sbn.key,
                     packageName = sbn.packageName,
@@ -1043,7 +1043,6 @@ class CutoutNotificationListenerService : NotificationListenerService() {
         private const val MAX_TRACKED_KEYS = 64
 
         /** The inbox avoids unbounded snapshots; Android still owns the full notification list. */
-        private const val MAX_INBOX_ENTRIES = 40
 
         /**
          * How long a notification's content stays suppressed after the island finishes with it, so
