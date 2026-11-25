@@ -41,6 +41,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private var flash: Card? = null
     private val pending = java.util.ArrayDeque<Pair<Long,Card>>()
     private var hub = false
+    private var mutedApps:Set<String> = emptySet()
+    private fun focused()=enabled("focus_mode",false)
     private var batteryLevel = -1
     private var plugged = false
     private val audio = service.getSystemService(android.media.AudioManager::class.java)
@@ -103,7 +105,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         }
     }
     private data class Card(val kind: String, val title: String, val detail: String = "", val accent: Int = BLUE,
-        val intent: PendingIntent? = null, val key: String? = null, val progress: Float? = null, val appIcon: android.graphics.drawable.Drawable? = null, val actions: List<CutoutSignal.Notification.Action> = emptyList(), val settingsAction:String?=null)
+        val intent: PendingIntent? = null, val key: String? = null, val progress: Float? = null, val appIcon: android.graphics.drawable.Drawable? = null, val actions: List<CutoutSignal.Notification.Action> = emptyList(), val settingsAction:String?=null, val packageName:String?=null)
     companion object {
         private val BLUE = Color.rgb(99, 202, 255)
         private val VIOLET = Color.rgb(181, 151, 255)
@@ -132,15 +134,15 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 is CutoutSignal.Notification -> {
                     // Never remove or snooze the user's actual notification in the new renderer.
                     // The listener is configured not to hold notifications in Reborn.
-                    if (enabled("notifications") && !keyguard.isKeyguardLocked && (!signal.isSilent || enabled("silent_notifications"))) {
+                    if (!focused() && signal.packageName !in mutedApps && enabled("notifications") && !keyguard.isKeyguardLocked && (!signal.isSilent || enabled("silent_notifications"))) {
                         val p = signal.progressData
                         show(Card(if(p!=null && !p.isComplete && enabled("live_progress"))"progress" else "message", if(enabled("message_text"))signal.title ?: signal.appName ?: "Notification" else signal.appName ?: "Notification",
                             if(enabled("message_text")) signal.text ?: signal.appName.orEmpty() else signal.appName.orEmpty(), BLUE, signal.contentIntent, signal.key,
                             p?.takeIf { it.max > 0 }?.let { it.current.toFloat() / it.max },
-                            runCatching { service.packageManager.getApplicationIcon(signal.packageName) }.getOrNull(), if(enabled("message_text"))signal.actions.filter{it.reply==null}.take(2) else emptyList()))
+                            runCatching { service.packageManager.getApplicationIcon(signal.packageName) }.getOrNull(), if(enabled("message_text"))signal.actions.filter{it.reply==null}.take(2) else emptyList(), packageName=signal.packageName))
                     }
                 }
-                is CutoutSignal.System -> if (prefs.getBoolean("events", true)) {
+                is CutoutSignal.System -> if (!focused() && prefs.getBoolean("events", true)) {
                     val t = signal.type.name
                     val kind = when {
                         t.startsWith("CHARGING") || t == "BATTERY_LOW" -> "energy"
@@ -161,16 +163,17 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 is CutoutSignal.SystemEnded -> Unit
                 is CutoutSignal.Music -> {
                     mediaIntent = signal.contentIntent
-                    if(prefs.getBoolean("music",true) && !keyguard.isKeyguardLocked) openLive("music")
+                    if(!focused() && prefs.getBoolean("music",true) && signal.packageName !in mutedApps && !keyguard.isKeyguardLocked) openLive("music")
                     else render()
                 }
                 is CutoutSignal.Call -> {
                     callIntent = signal.contentIntent; callActions = signal.actions
                     if (!signal.ongoing) openLive("call") else render()
                 }
-                is CutoutSignal.Timer -> { timerIntent = signal.contentIntent; if(enabled("timers"))openLive("timer") else render() }
+                is CutoutSignal.Timer -> { timerIntent = signal.contentIntent; if(enabled("timers") && !focused())openLive("timer") else render() }
             }
         } }
+        scope.launch { com.ekoehler.expressivecutout.data.AppPreferences(service).disabledPackages.collect { mutedApps=it; render() } }
         scope.launch { NexoraCalibration.mode.collect { render() } }
         scope.launch { NexoraCalibration.requests.collect { request ->
             if(!ringing() && !keyguard.isKeyguardLocked && enabled("enabled")) {
@@ -245,27 +248,30 @@ class NexoraOverlay(private val service: AccessibilityService) {
         if(!ringing() && autoCollapseAt!=0L && now>=autoCollapseAt){
             autoCollapseAt=0L; expanded=false
         }
-        if(now>=flashUntil) flash=null
+        if(now>=flashUntil || flash?.packageName in mutedApps) flash=null
+        if(focused()){flash=null;pending.clear()}
         if(flash?.kind=="progress" && !enabled("live_progress"))flash=null
         while(pending.isNotEmpty() && now-pending.peekFirst()!!.first>30000L)pending.removeFirst()
         if(!locked && !ringing() && !hub && !browsing && (flash==null || (autoCollapseAt==0L && pending.isNotEmpty())) && pending.isNotEmpty()) activate(pending.removeFirst().second,now)
-        flash?.takeIf { !locked || (it.kind != "message" && it.kind != "progress") }?.let { result.add(it) }
+        flash?.takeIf { !locked || (it.kind != "message" && it.kind != "progress") }?.let {
+            if(it.kind in setOf("message","progress") && !enabled("message_text")) result.add(it.copy(title=it.packageName?.let{pkg->runCatching{service.packageManager.getApplicationLabel(service.packageManager.getApplicationInfo(pkg,0)).toString()}.getOrNull()} ?: "Notification",detail="",actions=emptyList())) else result.add(it)
+        }
         if (locked) {
             OnCallBus.state.value?.let { result.add(Card("call",if(it.ongoing)"On call" else "Incoming call",if(it.ongoing)"Call in progress" else "Unlock to view",GREEN)) }
             return result
         }
         if(hub)result.add(Card("hub","Quick controls","Media volume",VIOLET))
-        if(enabled("notifications") && enabled("live_progress")) NotificationInboxBus.items.value.filter{(it.progress!=null || it.progressIndeterminate) && it.key!=flash?.key}.take(5).forEach{
+        if(!focused() && enabled("notifications") && enabled("live_progress")) NotificationInboxBus.items.value.filter{it.packageName !in mutedApps && (it.progress!=null || it.progressIndeterminate) && it.key!=flash?.key}.take(5).forEach{
             result.add(Card("progress",if(enabled("message_text"))it.title.ifBlank{it.appName}else it.appName,it.appName,BLUE,key=it.key,progress=it.progress,appIcon=runCatching{service.packageManager.getApplicationIcon(it.packageName)}.getOrNull()))
         }
-        if(enabled("charge_live",false) && enabled("events") && enabled("event_energy") && plugged && batteryLevel>=0 && flash?.kind!="energy") result.add(Card("energy","Charging","$batteryLevel%",GREEN))
-        if (prefs.getBoolean("music", true)) NowPlayingBus.state.value?.takeIf { it.isPlaying || (expanded && current?.kind == "music") }?.let {
+        if(!focused() && enabled("charge_live",false) && enabled("events") && enabled("event_energy") && plugged && batteryLevel>=0 && flash?.kind!="energy") result.add(Card("energy","Charging","$batteryLevel%",GREEN))
+        if (!focused() && prefs.getBoolean("music", true)) NowPlayingBus.state.value?.takeIf { it.packageName !in mutedApps && (it.isPlaying || (expanded && current?.kind == "music")) }?.let {
             result.add(Card("music", it.title ?: "Now playing", it.artist.orEmpty(), VIOLET, mediaIntent))
         }
         OnCallBus.state.value?.let { result.add(Card("call", it.callerLabel, if (it.ongoing) "On call" else "Incoming call", GREEN, callIntent)) }
-        if(enabled("timers"))RunningTimerBus.state.value?.let { result.add(Card("timer", it.label ?: "Timer", "", BLUE, timerIntent)) }
+        if(!focused() && enabled("timers"))RunningTimerBus.state.value?.let { result.add(Card("timer", it.label ?: "Timer", "", BLUE, timerIntent)) }
         if (browsing && enabled("inbox")) NotificationInboxBus.items.value.take(20).forEach {
-            if (it.key != flash?.key && result.none{card->card.key==it.key} && (enabled("silent_notifications") || !it.silent)) result.add(Card("message", if(enabled("message_text"))it.title else it.appName, it.appName, BLUE, key = it.key, appIcon=runCatching{service.packageManager.getApplicationIcon(it.packageName)}.getOrNull()))
+            if (it.packageName !in mutedApps && it.key != flash?.key && result.none{card->card.key==it.key} && (enabled("silent_notifications") || !it.silent)) result.add(Card("message", if(enabled("message_text"))it.title else it.appName, it.appName, BLUE, key = it.key, appIcon=runCatching{service.packageManager.getApplicationIcon(it.packageName)}.getOrNull()))
         }
         if(browsing && result.none{it.kind=="message" || it.kind=="progress"})result.add(Card("inbox_empty","All caught up","No active notifications",VIOLET))
         return result
@@ -335,6 +341,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         autoFocus?.let { kind ->
             val position=all.indexOfFirst{it.kind==kind}
             if(position>=0) { selection=position; autoFocus=null }
+            else if(browsing){val empty=all.indexOfFirst{it.kind=="inbox_empty"};if(empty>=0){selection=empty;autoFocus=null}}
         }
         if(ringing() && NexoraCalibration.mode.value==0) {
             val callIndex=all.indexOfFirst{it.kind=="call"}
@@ -342,7 +349,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         }
         selection = selection.coerceIn(0, all.lastIndex)
         val next = all[selection]
-        val changed = current?.kind != next.kind || current?.title != next.title
+        val changed = current?.kind != next.kind || current?.title != next.title || current?.key != next.key
         current = next
         CutoutWidthBus.update(if(expanded)CutoutKind.EXPANDED else CutoutKind.NORMAL,false,false)
         val v = panel ?: IslandView().also { panel = it }
@@ -515,6 +522,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         private var began = SystemClock.uptimeMillis()
         private var downX = 0f; private var downY = 0f
         private var downTime = 0L
+        private var draggingVolume=false
         var cameraX = 0f; var cameraY = 0f; var cameraRadius = 0f; var topHeight = 0f
         var visualX=0f; var visualY=0f; var visualWidth=0f; var visualHeight=0f
         var drawX=0f; var drawY=0f
@@ -644,6 +652,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
             color(Color.BLACK); canvas.drawRoundRect(rect, radius, radius, paint)
             silhouette.reset(); silhouette.addRoundRect(rect,radius,radius,Path.Direction.CW)
             canvas.clipPath(silhouette)
+            val reveal=if(enabled("reduce_motion",false))1f else (age/.18f).coerceIn(0f,1f)
+            if(reveal<.999f)canvas.saveLayerAlpha(0f,0f,w,h,((1f-(1f-reveal)*(1f-reveal))*255).toInt()) else canvas.save()
+            try {
             // Reference has a pure black silhouette without a visible outline.
             if(card.kind=="music") {
                 if(w>dp(105f)) musicLayout(canvas,w,h,expansion,age)
@@ -793,12 +804,15 @@ class NexoraOverlay(private val service: AccessibilityService) {
             canvas.restore()
             if(age<1.3f) postInvalidateOnAnimation()
             } finally { canvas.restore() }
+            } finally { canvas.restore() }
         }
         override fun onTouchEvent(event: MotionEvent): Boolean {
             if(preview) return true
             when(event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {downX=event.x;downY=event.y;downTime=SystemClock.uptimeMillis();if(enabled("haptics"))performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);return true}
+                MotionEvent.ACTION_DOWN -> {downX=event.x;downY=event.y;downTime=SystemClock.uptimeMillis();draggingVolume=card.kind=="hub" && open && event.y-drawY in (topHeight+dp(29f))..(topHeight+dp(55f));if(draggingVolume)setVolume((event.x-drawX-dp(20f))/(visualWidth-dp(40f)));if(enabled("haptics"))performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);return true}
+                MotionEvent.ACTION_MOVE -> {if(draggingVolume)setVolume((event.x-drawX-dp(20f))/(visualWidth-dp(40f)));return true}
                 MotionEvent.ACTION_UP -> {
+                    if(draggingVolume){draggingVolume=false;return true}
                     val dx=event.x-downX;val dy=event.y-downY
                     when {
                         abs(dx)>dp(35f) && abs(dx)>abs(dy) -> swipe(if(dx<0) 1 else -1)
@@ -808,7 +822,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     }
                     return true
                 }
-                MotionEvent.ACTION_CANCEL -> return true
+                MotionEvent.ACTION_CANCEL -> {draggingVolume=false;return true}
                 else -> return true
             }
         }

@@ -193,6 +193,7 @@ class NexoraActivity : Activity() {
                 }
                 add(status,20)
                 toggle("NEXORA Island","Master switch","enabled")
+                toggle("Focus mode","Pause non-call activities without dismissing Android notifications","focus_mode",false)
                 heading("PERSONALIZE")
                 button("Appearance","Size, position and live preview"){go("appearance")}
                 button("Motion","Timing, speed, haptics and motion lab"){go("motion")}
@@ -253,8 +254,57 @@ class NexoraActivity : Activity() {
                 toggle("Live progress","Downloads and uploads stay visible while Android reports progress","live_progress")
                 toggle("Notification inbox","Include recent active notifications when browsing","inbox")
                 button("Open inbox","Browse active notifications on the real island"){requestIsland("inbox")}
-                button("Apps & exclusions","Per-app filtering from the Android integration settings"){startActivity(Intent(this,MainActivity::class.java))}
+                button("Notification list","View and open active notifications in NEXORA"){go("inbox")}
+                button("Apps & exclusions","Choose which apps may appear"){go("apps")}
                 add(label("Lock screen message contents stay private. Android heads-up alerts remain enabled unless you explicitly change the advanced Shizuku setting.",13f,muted))
+            }
+            "apps"->{
+                pageFrame("Apps & exclusions","Turn off notifications and music for individual apps.")
+                val container=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
+                val search=EditText(this).apply{
+                    hint="Search apps";setHintTextColor(muted);setTextColor(white);setSingleLine(true)
+                    background=surface(Color.rgb(24,26,34),16);setPadding(dp(14),dp(10),dp(14),dp(10))
+                }
+                add(search);add(container)
+                val pm=packageManager
+                val apps=pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),0)
+                    .map{it.activityInfo.packageName to it.loadLabel(pm).toString()}.distinctBy{it.first}.filter{it.first!=packageName}.sortedBy{it.second.lowercase()}
+                val store=com.ekoehler.expressivecutout.data.AppPreferences(this)
+                mainScope.launch {
+                    val disabled=store.disabledPackages.first().toMutableSet()
+                    fun fill(q:String){
+                        container.removeAllViews()
+                        apps.filter{it.second.contains(q,true)||it.first.contains(q,true)}.forEach{(pkg,name)->
+                            val sw=Switch(this@NexoraActivity).apply{
+                                text=name;setTextColor(white);isChecked=pkg !in disabled;setPadding(dp(8),dp(9),dp(8),dp(9))
+                                setOnCheckedChangeListener{_,checked->
+                                    if(checked)disabled.remove(pkg) else disabled.add(pkg)
+                                    mainScope.launch{store.setEnabled(pkg,checked)}
+                                }
+                            }
+                            container.addView(sw,LinearLayout.LayoutParams(-1,-2))
+                        }
+                    }
+                    if(page=="apps"){
+                        fill(search.text.toString())
+                        search.addTextChangedListener(object:android.text.TextWatcher{
+                            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int)=Unit
+                            override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){fill(s?.toString().orEmpty())}
+                            override fun afterTextChanged(s:android.text.Editable?)=Unit
+                        })
+                    }
+                }
+            }
+            "inbox"->{
+                pageFrame("Inbox","Active notifications on your device. Nothing is stored.")
+                val items=NotificationInboxBus.items.value
+                if(items.isEmpty())add(label("All caught up",20f,muted,true))
+                else items.forEach{item->
+                    button(if(prefs.getBoolean("message_text",true))item.title.ifBlank{item.appName}else item.appName,item.appName){
+                        CutoutNotificationListenerService.openFromInbox(item.key)
+                    }
+                }
+                button("Refresh","Read the current notification snapshot"){drawPage()}
             }
             "gestures"->{
                 pageFrame("Gestures & controls","Stay in control without opening another app.")
