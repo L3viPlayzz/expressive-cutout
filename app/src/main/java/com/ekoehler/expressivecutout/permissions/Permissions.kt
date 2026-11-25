@@ -42,7 +42,8 @@ object Permissions {
             context.contentResolver,
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
         ).orEmpty()
-        return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
+        val component = ComponentName.unflattenFromString(expected)
+        return enabled.split(':').any { ComponentName.unflattenFromString(it) == component }
     }
 
     /**
@@ -101,7 +102,11 @@ object Permissions {
      * held, and reports whether all of them went through. Blocking: call off the main thread, and
      * only when [ShizukuState.status] is [com.ekoehler.expressivecutout.system.ShizukuStatus.READY].
      */
+    fun isPostNotificationGranted(context: Context): Boolean =
+        android.os.Build.VERSION.SDK_INT < 33 || context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
     fun grantMissingWithShizuku(context: Context): Boolean {
+        if (ShizukuState.status.value != com.ekoehler.expressivecutout.system.ShizukuStatus.READY) return false
         val pkg = context.packageName
         val listener = ComponentName(context, CutoutNotificationListenerService::class.java)
             .flattenToString()
@@ -114,14 +119,17 @@ object Permissions {
         val commands = buildList {
             if (!isNotificationAccessGranted(context)) add("cmd notification allow_listener $listener")
             if (!isAccessibilityGranted(context)) {
-                val services = listOf(enabledServices, accessibility).filter { it.isNotEmpty() }
-                add("settings put secure enabled_accessibility_services '${services.joinToString(":")}'")
+                val services = (enabledServices.split(':').filter { ComponentName.unflattenFromString(it) != null } + accessibility).distinct()
+                val safeServices = services.joinToString(":").replace("'", "'\\''")
+                add("settings put secure enabled_accessibility_services '$safeServices'")
                 add("settings put secure accessibility_enabled 1")
             }
             if (!isBatteryOptimizationIgnored(context)) add("dumpsys deviceidle whitelist +$pkg")
             if (!isPhoneStateGranted(context)) add("pm grant $pkg $PHONE_STATE")
+            if (!isPostNotificationGranted(context)) add("pm grant $pkg android.permission.POST_NOTIFICATIONS")
         }
-        return commands.all(ShizukuState::runAsShell)
+        // Attempt each missing grant even when one is blocked by the device.
+        return commands.map(ShizukuState::runAsShell).all { it }
     }
 
     private fun Context.startActivitySafely(intent: Intent): Boolean = runCatching {

@@ -13,7 +13,13 @@ import android.widget.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
-import com.ekoehler.expressivecutout.MainActivity
+import com.ekoehler.expressivecutout.permissions.Permissions
+import com.ekoehler.expressivecutout.data.StatusBarPreferences
+import com.ekoehler.expressivecutout.data.StatusBarHideMode
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import com.ekoehler.expressivecutout.core.*
 import com.ekoehler.expressivecutout.service.CutoutAccessibilityService
 import com.ekoehler.expressivecutout.service.CutoutNotificationListenerService
@@ -30,10 +36,31 @@ class NexoraActivity : Activity() {
     private var calibrating = false
     private var calibrationMode = 1
     private var page = "home"
+    private var granting=false
+    private var grantAfterConsent=false
+    private var grantSummary:String?=null
+    private var statusJob:kotlinx.coroutines.Job?=null
     private val mainScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob()+kotlinx.coroutines.Dispatchers.Main.immediate)
     private fun dp(v:Int) = (v*resources.displayMetrics.density).toInt()
     private fun surface(c:Int,r:Int=22)=GradientDrawable().apply{setColor(c);cornerRadius=dp(r).toFloat()}
-    override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);window.statusBarColor=Color.BLACK;window.navigationBarColor=Color.BLACK;window.decorView.systemUiVisibility=0;drawMenu()}
+    override fun onCreate(savedInstanceState:Bundle?){
+        super.onCreate(savedInstanceState)
+        window.statusBarColor=Color.BLACK;window.navigationBarColor=Color.BLACK;window.decorView.systemUiVisibility=0
+        page=savedInstanceState?.getString("page") ?: "home"
+        calibrating=savedInstanceState?.getBoolean("calibrating") ?: false
+        calibrationMode=savedInstanceState?.getInt("calibrationMode",1) ?: 1
+        if(calibrating)drawCalibration() else drawPage()
+        statusJob=mainScope.launch{
+            ShizukuState.status.collect{state->
+                if(state==ShizukuStatus.READY && grantAfterConsent){grantAfterConsent=false;grantAll()}
+                else if(page=="access" && !granting && !isFinishing && !isDestroyed)drawPage()
+            }
+        }
+    }
+    override fun onSaveInstanceState(outState:Bundle){
+        outState.putString("page",page);outState.putBoolean("calibrating",calibrating);outState.putInt("calibrationMode",calibrationMode)
+        super.onSaveInstanceState(outState)
+    }
     override fun onResume(){
         super.onResume()
         ShizukuState.refresh()
@@ -45,6 +72,8 @@ class NexoraActivity : Activity() {
     }
     override fun onDestroy(){
         NexoraCalibration.mode.value=0
+        grantAfterConsent=false
+        statusJob?.cancel()
         mainScope.cancel()
         super.onDestroy()
     }
@@ -176,6 +205,52 @@ class NexoraActivity : Activity() {
         }
         add(row,15)
     }
+    private fun confirmGrantAll(){
+        if(ShizukuState.status.value==ShizukuStatus.NOT_INSTALLED || ShizukuState.status.value==ShizukuStatus.NOT_RUNNING){
+            Permissions.openShizuku(this);return
+        }
+        android.app.AlertDialog.Builder(this).setTitle("Grant NEXORA permissions?")
+            .setMessage("Allow Shizuku to enable NEXORA accessibility, notification access, battery exemption, phone state and optional test notifications. Other apps and accessibility services will be kept. You can revoke grants in Android settings.")
+            .setNegativeButton("Cancel",null)
+            .setPositiveButton("Grant all"){_,_->
+                if(ShizukuState.status.value==ShizukuStatus.READY)grantAll()
+                else {grantAfterConsent=true;ShizukuState.requestPermission()}
+            }.show()
+    }
+    private fun grantAll(){
+        if(granting)return
+        granting=true;grantSummary=null
+        if(page=="access")drawPage()
+        mainScope.launch{
+            val commandsOk=withContext(Dispatchers.IO){runCatching{Permissions.grantMissingWithShizuku(applicationContext)}.getOrDefault(false)}
+            delay(800)
+            val missing=buildList{
+                if(!Permissions.isAccessibilityGranted(this@NexoraActivity))add("Accessibility")
+                if(!Permissions.isNotificationAccessGranted(this@NexoraActivity))add("Notification access")
+                if(!Permissions.isBatteryOptimizationIgnored(this@NexoraActivity))add("Battery exemption")
+                if(!Permissions.isPhoneStateGranted(this@NexoraActivity))add("Phone state")
+                if(!Permissions.isPostNotificationGranted(this@NexoraActivity))add("Test notifications")
+            }
+            grantSummary=if(missing.isEmpty())"All five permissions verified." else "Still missing: "+missing.joinToString(", ")+". Use the individual settings below."
+            if(!commandsOk && missing.isEmpty())grantSummary="All requested permissions verified."
+            granting=false
+            if(page=="access" && !isFinishing && !isDestroyed)drawPage()
+        }
+    }
+    private fun statusMode(title:String,current:StatusBarHideMode,write:suspend(StatusBarHideMode)->Unit){
+        add(label(title,15f,white,true),8)
+        val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
+        StatusBarHideMode.entries.forEach{mode->
+            val b=Button(this).apply{
+                text=mode.name.lowercase().replaceFirstChar{it.uppercase()};isAllCaps=false
+                setTextColor(if(mode==current)Color.BLACK else white)
+                background=surface(if(mode==current)blue else Color.rgb(29,32,42),16)
+                setOnClickListener{mainScope.launch{write(mode);drawPage()}}
+            }
+            row.addView(b,LinearLayout.LayoutParams(0,dp(44),1f).apply{marginEnd=dp(5)})
+        }
+        add(row,14)
+    }
     private fun drawMenu(){page="home";drawPage()}
     private fun drawPage(){
         when(page){
@@ -201,7 +276,8 @@ class NexoraActivity : Activity() {
                 button("Notifications","Privacy, queue and inbox"){go("notifications")}
                 button("Gestures & controls","Swipe, long press and Quick Controls"){go("gestures")}
                 heading("SYSTEM")
-                button("Setup & Shizuku","Permissions and Android integration"){go("access")}
+                button("Setup & Shizuku","Permissions in one place"){go("access")}
+                button("Status bar","Optional Shizuku status bar controls"){go("statusbar")}
                 button("About","Version, credits and source code"){go("about")}
             }
             "appearance"->{
@@ -226,9 +302,10 @@ class NexoraActivity : Activity() {
                 toggle("Reduced motion","Short transitions and static waveform","reduce_motion",false)
                 heading("MOTION LAB")
                 button("Notification Morph","Try a sample notification without sending one"){requestIsland("demo_message")}
-                button("Energy Flow","Preview a charge at 84%"){preview(SystemEventType.CHARGING_STARTED,84)}
+                button("Energy Flow","Preview the kinetic charging animation at 84%"){requestIsland("demo_charge")}
                 button("Connect Pulse","Preview a Wi-Fi connection"){preview(SystemEventType.WIFI_CONNECTED)}
-                button("Unlock Signature","Preview confirmed-unlock effect only"){preview(SystemEventType.DEVICE_UNLOCKED)}
+                button("Wake Signature","Preview the locked-state capsule"){requestIsland("demo_lock")}
+                button("Unlock Signature","Preview the animated opening lock and green confirmation"){requestIsland("demo_unlock")}
                 button("Sound Flow","Live music layout with sample artwork"){calibrating=true;calibrationMode=2;drawCalibration()}
             }
             "activities"->{
@@ -241,7 +318,7 @@ class NexoraActivity : Activity() {
                 toggle("Live charging","Keep the real battery level compact while plugged in","charge_live",false)
                 toggle("Connectivity","Wi-Fi, Bluetooth, VPN, headphones and hotspot","event_connect")
                 toggle("Unlock Signature","Confirmed device unlock, not biometric scanning","event_unlock")
-                toggle("Device locked","Show lock events when the screen is on","event_lock")
+                toggle("Wake island","Show the compact lock while the lock screen is awake, never on AOD","lock_wake")
                 toggle("Other system events","USB, debugging and ringer mode","event_system")
                 heading("CALLS")
                 add(label("Incoming calls always get priority. Supported answer and decline actions stay available until the dialer confirms the call state.",14f,muted))
@@ -257,7 +334,7 @@ class NexoraActivity : Activity() {
                 button("Open inbox","Browse active notifications on the real island"){requestIsland("inbox")}
                 button("Notification list","View and open active notifications in NEXORA"){go("inbox")}
                 button("Apps & exclusions","Choose which apps may appear"){go("apps")}
-                add(label("Lock screen message contents stay private. Android heads-up alerts remain enabled unless you explicitly change the advanced Shizuku setting.",13f,muted))
+                add(label("Lock screen message contents stay private. Android heads-up alerts remain enabled unless you explicitly change the Status bar settings.",13f,muted))
             }
             "apps"->{
                 pageFrame("Apps & exclusions","Turn off notifications and music for individual apps.")
@@ -317,21 +394,60 @@ class NexoraActivity : Activity() {
                 add(label("Tap compact to expand. Tap the camera row to collapse. Tap a notification to open it. Incoming calls override navigation gestures until answered or declined.",14f,muted))
             }
             "access"->{
-                pageFrame("Setup & Shizuku","Grant only the access you want to use.")
-                button("Accessibility overlay",if(CutoutAccessibilityService.bound.value)"Connected • ready" else "Required • enable NEXORA"){open(Settings.ACTION_ACCESSIBILITY_SETTINGS)}
-                button("Notification access",if(CutoutNotificationListenerService.bound.value)"Connected • media and messages" else "Required for notifications and music"){open(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)}
+                pageFrame("Setup & Shizuku","Grant the permissions needed for NEXORA.")
                 button("Shizuku",ShizukuState.status.value.name.replace('_',' ')){
-                    when(ShizukuState.status.value){
-                        ShizukuStatus.PERMISSION_REQUIRED->ShizukuState.requestPermission()
-                        ShizukuStatus.READY->startActivity(Intent(this,MainActivity::class.java))
-                        else->ShizukuState.installedManagerPackage(this)?.let{packageManager.getLaunchIntentForPackage(it)}?.let{startActivity(it)} ?: Toast.makeText(this,"Install and start Shizuku first",Toast.LENGTH_LONG).show()
+                    if(ShizukuState.status.value==ShizukuStatus.PERMISSION_REQUIRED)ShizukuState.requestPermission()
+                    else if(ShizukuState.status.value!=ShizukuStatus.READY)Permissions.openShizuku(this)
+                    else Toast.makeText(this,"Shizuku connected",Toast.LENGTH_SHORT).show()
+                }
+                button(if(granting)"Applying permissions…" else "Grant all with Shizuku",if(granting)"Checking Android permissions" else "Accessibility, notifications, battery exemption, phone state and test alerts"){
+                    if(!granting)confirmGrantAll()
+                }
+                grantSummary?.let{add(label(it,14f,muted),12)}
+                heading("INDIVIDUAL PERMISSIONS")
+                button("Accessibility overlay",if(Permissions.isAccessibilityGranted(this))"Granted"+if(CutoutAccessibilityService.bound.value)" • connected" else " • waiting for service" else "Not granted"){Permissions.openAccessibilitySettings(this)}
+                button("Notification access",if(Permissions.isNotificationAccessGranted(this))"Granted"+if(CutoutNotificationListenerService.bound.value)" • connected" else " • waiting for service" else "Not granted"){Permissions.openNotificationAccessSettings(this)}
+                button("Battery optimization",if(Permissions.isBatteryOptimizationIgnored(this))"Exempt" else "Allow reliable background operation"){Permissions.requestIgnoreBatteryOptimization(this)}
+                button("Phone permission",if(Permissions.isPhoneStateGranted(this))"Granted" else "Optional • improve call-end detection"){
+                    requestPermissions(arrayOf(android.Manifest.permission.READ_PHONE_STATE),601)
+                }
+                if(android.os.Build.VERSION.SDK_INT>=33)button("Test notifications",if(Permissions.isPostNotificationGranted(this))"Granted" else "Optional • allow NEXORA test notifications"){
+                    requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),602)
+                }
+                button("Refresh status","Recheck actual Android grants and Shizuku connection"){ShizukuState.refresh();drawPage()}
+                add(label("Shizuku must be running and authorized. Android or device restrictions may block individual grants; these remain available above.",13f,muted))
+            }
+            "statusbar"->{
+                pageFrame("Status bar","Optional Shizuku controls. System alerts are kept by default.")
+                if(ShizukuState.status.value!=ShizukuStatus.READY){
+                    button("Connect Shizuku","Required for these controls"){go("access")}
+                } else {
+                    val store=StatusBarPreferences(this)
+                    mainScope.launch{
+                        val icons=store.notificationIconsMode.first()
+                        val system=store.systemInfoMode.first()
+                        val clock=store.clockMode.first()
+                        val silent=store.silenceAlerts.first()
+                        if(page=="statusbar" && !isFinishing && !isDestroyed){
+                            statusMode("Notification icons",icons){store.setNotificationIconsMode(it)}
+                            statusMode("System information",system){store.setSystemInfoMode(it)}
+                            statusMode("Clock",clock){store.setClockMode(it)}
+                            val sw=Switch(this@NexoraActivity).apply{
+                                text="Silence Android system alerts";setTextColor(white);isChecked=silent;setPadding(dp(8),dp(12),dp(8),dp(12))
+                                setOnCheckedChangeListener{_,checked->
+                                    if(checked)android.app.AlertDialog.Builder(this@NexoraActivity)
+                                        .setTitle("Silence system alerts?")
+                                        .setMessage("Android may suppress sounds or heads-up alerts globally, including apps excluded from NEXORA. Notifications remain in the shade. Enable only if you accept this.")
+                                        .setNegativeButton("Cancel"){_,_->drawPage()}
+                                        .setPositiveButton("Enable"){_,_->mainScope.launch{store.setSilenceAlerts(true);drawPage()}}.show()
+                                    else mainScope.launch{store.setSilenceAlerts(false)}
+                                }
+                            }
+                            add(sw)
+                            add(label("Auto hides selected status icons only when the island expands. Behavior varies by Android version.",13f,muted))
+                        }
                     }
                 }
-                button("Phone permission","Optional • improve call-end detection"){
-                    if(android.os.Build.VERSION.SDK_INT>=23)requestPermissions(arrayOf(android.Manifest.permission.READ_PHONE_STATE),601)
-                }
-                button("Advanced Android settings","Original integration, per-app and status bar settings"){startActivity(Intent(this,MainActivity::class.java))}
-                add(label("Shizuku cannot grant unrestricted system access. Some legacy appearance settings do not control the new renderer.",13f,muted))
             }
             "about"->{
                 pageFrame("About NEXORA","Studio • Reborn")
