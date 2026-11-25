@@ -40,6 +40,7 @@ class NexoraActivity : Activity() {
     private var grantAfterConsent=false
     private var grantSummary:String?=null
     private var statusJob:kotlinx.coroutines.Job?=null
+    private var pageEpoch=0
     private val mainScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob()+kotlinx.coroutines.Dispatchers.Main.immediate)
     private fun dp(v:Int) = (v*resources.displayMetrics.density).toInt()
     private fun surface(c:Int,r:Int=22)=GradientDrawable().apply{setColor(c);cornerRadius=dp(r).toFloat()}
@@ -176,6 +177,7 @@ class NexoraActivity : Activity() {
     }
     private fun go(target:String){page=target;drawPage()}
     private fun pageFrame(title:String,subtitle:String){
+        pageEpoch++
         val scroll=ScrollView(this).apply{setBackgroundColor(Color.BLACK);isFillViewport=true;clipToPadding=false}
         content=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(20),dp(24),dp(20),dp(32))}
         scroll.addView(content);setContentView(scroll)
@@ -348,6 +350,7 @@ class NexoraActivity : Activity() {
                 val apps=pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),0)
                     .map{it.activityInfo.packageName to it.loadLabel(pm).toString()}.distinctBy{it.first}.filter{it.first!=packageName}.sortedBy{it.second.lowercase()}
                 val store=com.ekoehler.expressivecutout.data.AppPreferences(this)
+                val epoch=pageEpoch
                 mainScope.launch {
                     val disabled=store.disabledPackages.first().toMutableSet()
                     fun fill(q:String){
@@ -363,7 +366,7 @@ class NexoraActivity : Activity() {
                             container.addView(sw,LinearLayout.LayoutParams(-1,-2))
                         }
                     }
-                    if(page=="apps"){
+                    if(page=="apps" && pageEpoch==epoch){
                         fill(search.text.toString())
                         search.addTextChangedListener(object:android.text.TextWatcher{
                             override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int)=Unit
@@ -423,12 +426,13 @@ class NexoraActivity : Activity() {
                     button("Connect Shizuku","Required for these controls"){go("access")}
                 } else {
                     val store=StatusBarPreferences(this)
+                    val epoch=pageEpoch
                     mainScope.launch{
                         val icons=store.notificationIconsMode.first()
                         val system=store.systemInfoMode.first()
                         val clock=store.clockMode.first()
                         val silent=store.silenceAlerts.first()
-                        if(page=="statusbar" && !isFinishing && !isDestroyed){
+                        if(page=="statusbar" && pageEpoch==epoch && !isFinishing && !isDestroyed){
                             statusMode("Notification icons",icons){store.setNotificationIconsMode(it)}
                             statusMode("System information",system){store.setSystemInfoMode(it)}
                             statusMode("Clock",clock){store.setClockMode(it)}

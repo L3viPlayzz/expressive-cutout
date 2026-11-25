@@ -4,6 +4,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NexoraPolicyTest {
+    @Test fun onlyInteractiveDisplayCanDraw() {
+        assertTrue(NexoraPolicy.canDraw(true,true))
+        assertFalse(NexoraPolicy.canDraw(false,true))
+        assertFalse(NexoraPolicy.canDraw(true,false))
+        assertFalse(NexoraPolicy.canDraw(false,false))
+    }
     @Test fun timingDefaultsAndClamps() {
         assertEquals(3000L,NexoraPolicy.expandedMillis(3))
         assertEquals(1000L,NexoraPolicy.expandedMillis(-1))

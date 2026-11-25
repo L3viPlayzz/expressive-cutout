@@ -100,7 +100,12 @@ object ShizukuState {
      * counts as a failed command.
      */
     fun runAsShell(command: String): Boolean = runCatching {
-        startShell(command).waitFor() == 0
+        val process=startShell(command)
+        try {
+            if(android.os.Build.VERSION.SDK_INT>=26) {
+                process.waitFor(15,java.util.concurrent.TimeUnit.SECONDS) && process.exitValue()==0
+            } else process.waitFor()==0
+        } finally { process.destroy() }
     }.getOrElse { error ->
         Log.w(TAG, "Shell command failed: $command", error)
         false

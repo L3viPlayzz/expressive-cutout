@@ -99,20 +99,22 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private var screenReceiverRegistered = false
     private var lastUnlockAt = -10000L
     private var hadLockedScreen = false
-    private fun displayAwake():Boolean = power.isInteractive &&
-        displayManager?.getDisplay(Display.DEFAULT_DISPLAY)?.state == Display.STATE_ON
+    private var displayVisible=false
+    private fun displayAwake():Boolean = NexoraPolicy.canDraw(power.isInteractive, displayManager?.getDisplay(Display.DEFAULT_DISPLAY)?.state == Display.STATE_ON)
     private val displayListener = object:android.hardware.display.DisplayManager.DisplayListener {
         override fun onDisplayAdded(id:Int)=Unit
         override fun onDisplayRemoved(id:Int){if(id==Display.DEFAULT_DISPLAY)remove()}
         override fun onDisplayChanged(id:Int){
             if(id==Display.DEFAULT_DISPLAY) {
-                if(!displayAwake()) { handler.removeCallbacks(refresh); remove() }
+                if(!displayAwake()) { displayVisible=false; handler.removeCallbacks(refresh); remove() }
                 else render()
             }
         }
     }
     private fun confirmedUnlock(){
-        if(!displayAwake() || keyguard.isDeviceLocked || !enabled("enabled") || !enabled("events") || !enabled("event_unlock") || ringing())return
+        if(!displayAwake() || keyguard.isDeviceLocked)return
+        hadLockedScreen=false
+        if(!enabled("enabled") || !enabled("events") || !enabled("event_unlock") || ringing())return
         val now=SystemClock.uptimeMillis()
         if(now-lastUnlockAt<1300L)return
         lastUnlockAt=now
@@ -126,7 +128,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
         override fun onReceive(context: Context?, intent: android.content.Intent?) {
             if (intent?.action == android.content.Intent.ACTION_SCREEN_OFF) {
                 handler.removeCallbacks(refresh)
-                pending.clear(); hub=false; hadLockedScreen=true
+                displayVisible=false
+                pending.clear(); hub=false; hadLockedScreen=keyguard.isDeviceLocked || keyguard.isKeyguardLocked
                 flash = null; expanded = false; browsing = false; current = null; autoCollapseAt = 0L; autoFocus = null
                 remove()
             } else {
@@ -398,7 +401,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
 
     private fun render() {
         handler.removeCallbacks(refresh)
-        if ((!prefs.getBoolean("enabled", true) && NexoraCalibration.mode.value == 0) || !displayAwake() || service.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_PORTRAIT) {
+        displayVisible=displayAwake()
+        if ((!prefs.getBoolean("enabled", true) && NexoraCalibration.mode.value == 0) || !displayVisible || service.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_PORTRAIT) {
             flash = null; pending.clear(); hub=false; expanded = false; browsing = false; autoCollapseAt=0L; autoFocus=null; remove(); return
         }
         val all = cards()
@@ -414,13 +418,12 @@ class NexoraOverlay(private val service: AccessibilityService) {
         }
         selection = selection.coerceIn(0, all.lastIndex)
         if(keyguard.isKeyguardLocked && !ringing()) {
-            val lockIndex=all.indexOfFirst{it.kind=="unlock" || it.kind=="lock"}
+            val lockIndex=all.indexOfFirst{it.kind=="unlock" || it.kind=="energy"}.takeIf{it>=0} ?: all.indexOfFirst{it.kind=="lock"}
             if(lockIndex>=0){selection=lockIndex;if(all[lockIndex].kind=="lock")expanded=false}
         }
         val next = all[selection]
         val changed = current?.kind != next.kind || current?.title != next.title || current?.key != next.key
         current = next
-        CutoutWidthBus.update(if(expanded)CutoutKind.EXPANDED else CutoutKind.NORMAL,false,false)
         val v = panel ?: IslandView().also { panel = it }
         val metrics = if (Build.VERSION.SDK_INT >= 30) wm.currentWindowMetrics else null
         val screenWidth = metrics?.bounds?.width() ?: service.resources.displayMetrics.widthPixels
@@ -430,6 +433,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         val cameraX = cutout?.centerX()?.roundToInt() ?: screenWidth / 2
         val preview = NexoraCalibration.mode.value.takeUnless { keyguard.isKeyguardLocked } ?: 0
         val isExpanded = if (preview != 0) preview == 2 else expanded && !(next.kind=="lock" && keyguard.isKeyguardLocked)
+        CutoutWidthBus.update(if(preview!=0 || keyguard.isKeyguardLocked)null else if(isExpanded)CutoutKind.EXPANDED else CutoutKind.NORMAL,false,false)
         val scale = prefs.getInt("island_width",100).coerceIn(85,120)/100f
         val requestedHeight = prefs.getInt("island_height_v2",28).coerceIn(20,44)
         val cameraRadius = max(dp(6f), (cutout?.width() ?: 0f) / 2f + dp(1.5f))
@@ -755,8 +759,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
             paint.style=Paint.Style.FILL
         }
         private fun cameraHalo(canvas:Canvas,cy:Float,age:Float,success:Boolean){
-            val ring=cameraRadius+dp(1.6f)
-            if(ring+dp(1f)>min(cy,topHeight-cy))return
+            val ring=min(cameraRadius+dp(1.6f),min(cy,topHeight-cy)-dp(1f))
+            if(ring<cameraRadius-dp(.5f))return
             val t=if(enabled("reduce_motion",false))1f else NexoraPolicy.smoothstep(age/.65f)
             color(if(success)GREEN else VIOLET,if(success)230 else 170)
             paint.style=Paint.Style.STROKE;paint.strokeWidth=dp(1.4f);paint.strokeCap=Paint.Cap.ROUND
@@ -783,7 +787,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         }
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            if(!displayAwake())return
+            if(!displayVisible)return
             val age = (SystemClock.uptimeMillis() - began) / 1000f
             val w = visualWidth; val h = visualHeight
             if(w<=0f || h<=0f)return
