@@ -352,7 +352,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         if(card.kind=="progress" && card.key!=null && card.key==flash?.key){
             flash=card; render(); return
         }
-        if(ringing() || (enabled("queue_events",false) && flash!=null && now<autoCollapseAt && (card.key==null || card.key!=flash?.key))){
+        if(ringing() || inboxOpen || (enabled("queue_events",false) && flash!=null && now<autoCollapseAt && (card.key==null || card.key!=flash?.key))){
             if(card.key!=null)pending.removeAll{it.second.key==card.key}
             if(pending.size>=8)pending.removeFirst()
             pending.addLast(now to card)
@@ -388,7 +388,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         pending.removeAll{(_,card)->card.packageName?.let{it in mutedApps}==true || (card.kind in listOf("message","progress") && !enabled("notifications"))}
         if(flash?.kind=="progress" && !enabled("live_progress"))flash=null
         while(pending.isNotEmpty() && now-pending.peekFirst()!!.first>30000L)pending.removeFirst()
-        if(!locked && !ringing() && !hub && !browsing && flash==null && pending.isNotEmpty()) activate(pending.removeFirst().second,now)
+        if(!locked && !ringing() && !hub && !browsing && !inboxOpen && flash==null && pending.isNotEmpty()) activate(pending.removeFirst().second,now)
         flash?.takeIf { !locked || (it.kind != "message" && it.kind != "progress") }?.let {
             if(it.kind in setOf("message","progress") && !enabled("message_text")) result.add(it.copy(title=it.packageName?.let{pkg->runCatching{service.packageManager.getApplicationLabel(service.packageManager.getApplicationInfo(pkg,0)).toString()}.getOrNull()} ?: "Notification",detail="",actions=emptyList())) else result.add(it)
         }
@@ -923,6 +923,17 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 if(isEnergy){
                     val level=card.progress
                     val amount=if(level!=null)level.coerceIn(0f,1f)*orbit else orbit
+                    // Two finite soft pulses, contained inside the existing glyph.
+                    if(!reduced && age<1.15f && card.accent==GREEN){
+                        for(n in 0..1){
+                            val q=((age-.08f-n*.18f)/.66f).coerceIn(0f,1f)
+                            if(q>0f && q<1f){
+                                val rr=11f+10f*NexoraPolicy.smoothstep(q)
+                                color(GREEN,(115*sin(PI.toFloat()*q)).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.2f
+                                canvas.drawCircle(0f,0f,rr,paint)
+                            }
+                        }
+                    }
                     // The charge current travels in two overlapping bands. A bright leading
                     // segment settles into a quiet progress arc rather than flashing.
                     color(tone,230);paint.style=Paint.Style.STROKE;paint.strokeWidth=2.5f
@@ -974,6 +985,16 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     }
                 }
                 paint.style=Paint.Style.FILL;canvas.restore()
+            }
+            if(isEnergy && !reduced && card.accent==GREEN && age<.90f && w>dp(90f)){
+                val phase=NexoraPolicy.phase(age,.06f,.87f)
+                val start=cameraX+cameraRadius+dp(3f);val end=w-dp(10f)
+                val lineY=NexoraPolicy.lerp(cameraY+dp(5f),topHeight+dp(62f),t)
+                if(end>start && lineY<h-dp(3f)){
+                    val head=NexoraPolicy.lerp(start,end,phase)
+                    color(GREEN,(95*sin(PI.toFloat()*phase)).toInt());paint.strokeWidth=dp(1.4f);paint.strokeCap=Paint.Cap.ROUND
+                    canvas.drawLine(max(start,head-dp(17f)),lineY,head,lineY,paint)
+                }
             }
             val labelFade=(1f-NexoraPolicy.phase(e,.12f,.58f))*visibility
             val right=cameraX+cameraRadius+dp(5f)
@@ -1028,35 +1049,48 @@ class NexoraOverlay(private val service: AccessibilityService) {
         private fun connectionGlyph(canvas:Canvas,rawAge:Float){
             val age=if(reducedMotion)2f else rawAge
             val kind=card.eventType.orEmpty()
-            val t=NexoraPolicy.phase(age,.05f,.72f)
+            val t=NexoraPolicy.phase(age,.04f,.72f)
+            val disconnect=kind.contains("DISCONNECTED") || kind.endsWith("DISABLED")
             color(card.accent);paint.style=Paint.Style.STROKE;paint.strokeWidth=1.9f;paint.strokeCap=Paint.Cap.ROUND;paint.strokeJoin=Paint.Join.ROUND
             when {
                 card.kind=="timer" -> {
                     canvas.drawArc(-10f,-10f,10f,10f,-90f,360f*t,false,paint)
                     effectPath.reset();effectPath.moveTo(0f,-6f);effectPath.lineTo(0f,0f);effectPath.lineTo(5f,3f);trace(canvas,effectPath,NexoraPolicy.phase(age,.22f,.8f))
                 }
-                kind.contains("BLUETOOTH") -> {
-                    effectPath.reset();effectPath.moveTo(0f,-11f);effectPath.lineTo(7f,-5f);effectPath.lineTo(-7f,6f);effectPath.moveTo(-7f,-6f);effectPath.lineTo(7f,5f);effectPath.lineTo(0f,11f);effectPath.lineTo(0f,-11f)
-                    // Separate contour to keep the recognizable Bluetooth shape.
-                    paint.alpha=(255*t).toInt();canvas.drawPath(effectPath,paint)
+                kind.contains("BLUETOOTH") || kind.contains("VPN") -> {
+                    val f=if(disconnect)1f-t else t
+                    val distance=5f+4f*(1f-f)
+                    canvas.save();canvas.rotate(if(kind.contains("VPN"))0f else -35f)
+                    color(card.accent,220);paint.style=Paint.Style.STROKE;paint.strokeWidth=1.9f
+                    canvas.drawRoundRect(-distance-2.8f,-5f,-distance+4f,5f,3.5f,3.5f,paint)
+                    canvas.drawRoundRect(distance-4f,-5f,distance+2.8f,5f,3.5f,3.5f,paint)
+                    color(card.accent,(255*f).toInt());paint.strokeWidth=2.1f
+                    canvas.drawLine(-3f,0f,3f,0f,paint);canvas.restore()
                 }
                 kind.contains("HEADPHONES") -> {
-                    canvas.drawArc(-9f,-10f,9f,9f,180f,180f*t,false,paint)
-                    val f=NexoraPolicy.phase(age,.22f,.64f)
-                    color(card.accent,(255*f).toInt());canvas.drawRoundRect(-10f,-1f,-5f,8f,2f,2f,paint);canvas.drawRoundRect(5f,-1f,10f,8f,2f,2f,paint)
-                }
-                kind.contains("VPN") -> {
-                    effectPath.reset();effectPath.moveTo(0f,-11f);effectPath.lineTo(9f,-7f);effectPath.lineTo(8f,3f);effectPath.quadTo(5f,9f,0f,11f);effectPath.quadTo(-5f,9f,-8f,3f);effectPath.lineTo(-9f,-7f);effectPath.close();trace(canvas,effectPath,t)
+                    val f=NexoraPolicy.phase(age,.08f,.68f)
+                    val shift=2f*(1f-f)
+                    color(card.accent);paint.style=Paint.Style.STROKE;paint.strokeWidth=1.8f
+                    canvas.drawArc(-8f,-9f,8f,7f,180f,180f*f,false,paint)
+                    color(card.accent,(255*f).toInt())
+                    canvas.drawRoundRect(-10f-shift,-2f,-5f-shift,7f,2.5f,2.5f,paint)
+                    canvas.drawRoundRect(5f+shift,-2f,10f+shift,7f,2.5f,2.5f,paint)
                 }
                 else -> {
-                    for(i in 1..3){
-                        val f=NexoraPolicy.phase(age,.08f+i*.08f,.32f+i*.13f)
-                        val r=3f+i*3f
-                        color(card.accent,(255*f).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.9f
-                        canvas.drawArc(-r,3f-r,r,3f+r,270f-52f*f,104f*f,false,paint)
+                    for(n in 0..2){
+                        val f=NexoraPolicy.phase(age,.04f+n*.09f,.34f+n*.12f)
+                        val r=4f+n*3.1f
+                        color(card.accent,(255*f).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.8f
+                        canvas.drawArc(-r,5f-r,r,5f+r,270f-52f*f,104f*f,false,paint)
                     }
-                    color(card.accent);canvas.drawCircle(0f,4f,1.6f,paint)
+                    color(card.accent);canvas.drawCircle(0f,5f,1.5f,paint)
                 }
+            }
+            if(card.kind=="connect" && !reducedMotion && age<.95f){
+                val q=(age/.95f).coerceIn(0f,1f)
+                val radius=6f+5f*NexoraPolicy.smoothstep(q)
+                color(card.accent,(105*sin(PI.toFloat()*q)).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.1f
+                canvas.drawArc(-radius,-radius,radius,radius,-95f+130f*q,105f,false,paint)
             }
             paint.style=Paint.Style.FILL
         }
@@ -1153,7 +1187,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             if(card.kind=="inbox") {drawInbox(canvas,w,h,expansion);return}
             if(card.kind=="music") {
                 if(w>dp(105f)) musicLayout(canvas,w,h,expansion,age)
-                if(age<1.3f || (!reducedMotion && (preview || NowPlayingBus.state.value?.isPlaying==true)))postInvalidateOnAnimation()
+                if(!reducedMotion && (age<1.3f || preview || NowPlayingBus.state.value?.isPlaying==true))postInvalidateOnAnimation()
                 return
             }
             if(card.kind=="energy" || card.kind=="unlock" || card.kind=="lock") {
