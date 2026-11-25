@@ -132,12 +132,12 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 is CutoutSignal.Notification -> {
                     // Never remove or snooze the user's actual notification in the new renderer.
                     // The listener is configured not to hold notifications in Reborn.
-                    if (enabled("notifications") && !keyguard.isKeyguardLocked && (!signal.isSilent || enabled("silent_notifications",false))) {
+                    if (enabled("notifications") && !keyguard.isKeyguardLocked && (!signal.isSilent || enabled("silent_notifications"))) {
                         val p = signal.progressData
-                        show(Card("message", signal.title ?: signal.appName ?: "Notification",
+                        show(Card(if(p!=null && !p.isComplete && enabled("live_progress"))"progress" else "message", if(enabled("message_text"))signal.title ?: signal.appName ?: "Notification" else signal.appName ?: "Notification",
                             if(enabled("message_text")) signal.text ?: signal.appName.orEmpty() else signal.appName.orEmpty(), BLUE, signal.contentIntent, signal.key,
                             p?.takeIf { it.max > 0 }?.let { it.current.toFloat() / it.max },
-                            runCatching { service.packageManager.getApplicationIcon(signal.packageName) }.getOrNull(), signal.actions.filter{it.reply==null}.take(2)))
+                            runCatching { service.packageManager.getApplicationIcon(signal.packageName) }.getOrNull(), if(enabled("message_text"))signal.actions.filter{it.reply==null}.take(2) else emptyList()))
                     }
                 }
                 is CutoutSignal.System -> if (prefs.getBoolean("events", true)) {
@@ -173,9 +173,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
         } }
         scope.launch { NexoraCalibration.mode.collect { render() } }
         scope.launch { NexoraCalibration.requests.collect { request ->
-            if(!ringing() && !keyguard.isKeyguardLocked) {
+            if(!ringing() && !keyguard.isKeyguardLocked && enabled("enabled")) {
                 flash=null; pending.clear(); autoCollapseAt=0L; expanded=true; hub=request=="hub"; browsing=request=="inbox"; selection=0
-                autoFocus=if(hub)"hub" else "message"; render()
+                autoFocus=if(hub)"hub" else if(NotificationInboxBus.items.value.any{it.progress==null})"message" else "progress"; render()
             }
         } }
         scope.launch { NowPlayingBus.state.collect { render() } }
@@ -194,8 +194,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
             render()
         } }
         scope.launch { RunningTimerBus.state.collect { render() } }
-        scope.launch { DeviceLockBus.locked.collect { if (it) { flash = null; browsing = false; expanded = false; autoCollapseAt=0L; autoFocus=null }; render() } }
-        scope.launch { NotificationInboxBus.items.collect { if (browsing) render() } }
+        scope.launch { DeviceLockBus.locked.collect { if (it) { flash = null; pending.clear(); hub=false; browsing = false; expanded = false; autoCollapseAt=0L; autoFocus=null }; render() } }
+        scope.launch { NotificationInboxBus.items.collect { if (browsing || enabled("live_progress")) render() } }
         render()
     }
     private fun openLive(kind: String) {
@@ -208,12 +208,14 @@ class NexoraOverlay(private val service: AccessibilityService) {
         render()
     }
     private fun show(card: Card) {
+        if(!enabled("enabled") || !power.isInteractive)return
         // Incoming calls keep priority until answered or declined.
         val now=SystemClock.uptimeMillis()
-        if(card.key!=null && card.key==flash?.key && card.progress!=null){
+        if(card.kind=="progress" && flash?.key!=card.key && NotificationInboxBus.items.value.any{it.key==card.key && (it.progress!=null || it.progressIndeterminate)} && current?.key==card.key){render();return}
+        if(card.kind=="progress" && card.key!=null && card.key==flash?.key){
             flash=card; render(); return
         }
-        if(ringing() || (enabled("queue_events") && flash!=null && now<autoCollapseAt && card.key!=flash?.key)){
+        if(ringing() || (enabled("queue_events",false) && flash!=null && now<autoCollapseAt && (card.key==null || card.key!=flash?.key))){
             if(card.key!=null)pending.removeAll{it.second.key==card.key}
             if(pending.size>=8)pending.removeFirst()
             pending.addLast(now to card)
@@ -244,14 +246,18 @@ class NexoraOverlay(private val service: AccessibilityService) {
             autoCollapseAt=0L; expanded=false
         }
         if(now>=flashUntil) flash=null
+        if(flash?.kind=="progress" && !enabled("live_progress"))flash=null
         while(pending.isNotEmpty() && now-pending.peekFirst()!!.first>30000L)pending.removeFirst()
         if(!locked && !ringing() && !hub && !browsing && (flash==null || (autoCollapseAt==0L && pending.isNotEmpty())) && pending.isNotEmpty()) activate(pending.removeFirst().second,now)
-        flash?.takeIf { !locked || it.kind != "message" }?.let { result.add(it) }
+        flash?.takeIf { !locked || (it.kind != "message" && it.kind != "progress") }?.let { result.add(it) }
         if (locked) {
             OnCallBus.state.value?.let { result.add(Card("call",if(it.ongoing)"On call" else "Incoming call",if(it.ongoing)"Call in progress" else "Unlock to view",GREEN)) }
             return result
         }
         if(hub)result.add(Card("hub","Quick controls","Media volume",VIOLET))
+        if(enabled("notifications") && enabled("live_progress")) NotificationInboxBus.items.value.filter{(it.progress!=null || it.progressIndeterminate) && it.key!=flash?.key}.take(5).forEach{
+            result.add(Card("progress",if(enabled("message_text"))it.title.ifBlank{it.appName}else it.appName,it.appName,BLUE,key=it.key,progress=it.progress,appIcon=runCatching{service.packageManager.getApplicationIcon(it.packageName)}.getOrNull()))
+        }
         if(enabled("charge_live",false) && enabled("events") && enabled("event_energy") && plugged && batteryLevel>=0 && flash?.kind!="energy") result.add(Card("energy","Charging","$batteryLevel%",GREEN))
         if (prefs.getBoolean("music", true)) NowPlayingBus.state.value?.takeIf { it.isPlaying || (expanded && current?.kind == "music") }?.let {
             result.add(Card("music", it.title ?: "Now playing", it.artist.orEmpty(), VIOLET, mediaIntent))
@@ -259,8 +265,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
         OnCallBus.state.value?.let { result.add(Card("call", it.callerLabel, if (it.ongoing) "On call" else "Incoming call", GREEN, callIntent)) }
         if(enabled("timers"))RunningTimerBus.state.value?.let { result.add(Card("timer", it.label ?: "Timer", "", BLUE, timerIntent)) }
         if (browsing && enabled("inbox")) NotificationInboxBus.items.value.take(20).forEach {
-            if (it.key != flash?.key) result.add(Card("message", if(enabled("message_text"))it.title else it.appName, it.appName, BLUE, key = it.key, appIcon=runCatching{service.packageManager.getApplicationIcon(it.packageName)}.getOrNull()))
+            if (it.key != flash?.key && result.none{card->card.key==it.key} && (enabled("silent_notifications") || !it.silent)) result.add(Card("message", if(enabled("message_text"))it.title else it.appName, it.appName, BLUE, key = it.key, appIcon=runCatching{service.packageManager.getApplicationIcon(it.packageName)}.getOrNull()))
         }
+        if(browsing && result.none{it.kind=="message" || it.kind=="progress"})result.add(Card("inbox_empty","All caught up","No active notifications",VIOLET))
         return result
     }
     // Keep the window stable during animation. Only the Canvas geometry morphs per frame;
@@ -452,7 +459,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         val c = current ?: return
         autoCollapseAt=0L; autoFocus=null
         if (!expanded) { expanded = true; render(); return }
-        if (y < (panel?.topHeight ?: 0f)) { if(!ringing()){expanded = false; browsing = false; render()}; return }
+        if (y < (panel?.topHeight ?: 0f)) { if(!ringing()){expanded = false; browsing = false; hub=false; render()}; return }
         if (keyguard.isKeyguardLocked) return
         if(c.kind=="hub") {
             val w=panel?.visualWidth ?: return
@@ -484,7 +491,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 }
                 i?.let { index -> runCatching { actions[index].intent.send() } }
             }
-        } else if(c.kind=="message" && c.actions.isNotEmpty() && y in ((panel?.topHeight ?: 0f)+dp(57f))..((panel?.topHeight ?: 0f)+dp(89f))) {
+        } else if(c.kind=="message" && enabled("message_text") && c.actions.isNotEmpty() && y in ((panel?.topHeight ?: 0f)+dp(57f))..((panel?.topHeight ?: 0f)+dp(89f))) {
             val w=panel?.visualWidth ?: return
             val left=dp(14f); val gap=dp(8f);val bw=(w-2*left-gap*(c.actions.size-1))/c.actions.size
             c.actions.forEachIndexed{i,action->if(x>=left+i*(bw+gap) && x<=left+i*(bw+gap)+bw)runCatching{action.intent.send()}}
@@ -718,6 +725,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                         String.format(java.util.Locale.ROOT,"%02d:%02d",sec/60,sec%60)
                     } else "Call"
                 }
+                "progress" -> card.progress?.let{"${(it*100).roundToInt()}%"} ?: "Working"
                 "energy" -> card.detail.ifBlank { "Power" }
                 "music" -> if (NowPlayingBus.state.value?.isPlaying == true) "Playing" else "Paused"
                 "unlock" -> "Unlocked"
@@ -729,6 +737,10 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     String.format(java.util.Locale.ROOT,"%02d:%02d",sec/60,sec%60)
                 } ?: "Timer"
                 else -> card.title
+            }
+            if(card.kind=="progress" && card.progress!=null){
+                val leftBar=right; val rightBar=w-dp(12f);val yy=cy+dp(7f)
+                if(rightBar>leftBar){color(0xFF292929.toInt());canvas.drawRoundRect(leftBar,yy,rightBar,yy+dp(2f),dp(1f),dp(1f),paint);gradient(leftBar,yy,rightBar-leftBar,dp(2f));canvas.drawRoundRect(leftBar,yy,leftBar+(rightBar-leftBar)*card.progress.coerceIn(0f,1f),yy+dp(2f),dp(1f),dp(1f),paint)}
             }
             if (card.kind == "energy") {
                 val labelX=max(right,cameraX+(w-cameraX)*.28f)
@@ -753,7 +765,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 text(canvas,detail,left,y+dp(42f),12f,Color.LTGRAY,w-left*2)
                 val progress=card.progress
                 if(progress!=null){color(Color.DKGRAY);canvas.drawRoundRect(left,y+dp(49f),w-left,y+dp(52f),dp(2f),dp(2f),paint);color(accent);canvas.drawRoundRect(left,y+dp(49f),left+(w-2*left)*progress.coerceIn(0f,1f),y+dp(52f),dp(2f),dp(2f),paint)}
-                val actions=if(card.kind=="call" && !keyguard.isKeyguardLocked) callButtons() else if(card.kind=="message")card.actions else emptyList()
+                val actions=if(card.kind=="call" && !keyguard.isKeyguardLocked) callButtons() else if(card.kind=="message" && enabled("message_text"))card.actions else emptyList()
                 if(card.kind=="hub") {
                     val l=dp(20f); val v=volumeFraction(); val barY=y+dp(48f)
                     color(0xFF303239.toInt());canvas.drawRoundRect(l,barY,w-l,barY+dp(4f),dp(2f),dp(2f),paint)

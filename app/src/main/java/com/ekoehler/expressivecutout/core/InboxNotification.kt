@@ -7,5 +7,8 @@ data class InboxNotification(
     val appName: String,
     val title: String,
     val postTimeMs: Long,
+    val progress: Float? = null,
+    val progressIndeterminate: Boolean = false,
+    val silent: Boolean = false,
 )
 

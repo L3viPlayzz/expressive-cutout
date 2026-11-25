@@ -247,9 +247,10 @@ class NexoraActivity : Activity() {
             "notifications"->{
                 pageFrame("Notifications","Your messages stay in the Android notification shade.")
                 toggle("Notification morph","Show new notifications in the island","notifications")
-                toggle("Silent notifications","Also include notifications marked silent by Android","silent_notifications",false)
+                toggle("Silent notifications","Also include notifications marked silent by Android","silent_notifications")
                 toggle("Message previews","Show message content while the phone is unlocked","message_text")
-                toggle("Smart queue","Let new events wait rather than interrupt each other","queue_events")
+                toggle("Smart queue","Optional • let new events wait rather than interrupt each other","queue_events",false)
+                toggle("Live progress","Downloads and uploads stay visible while Android reports progress","live_progress")
                 toggle("Notification inbox","Include recent active notifications when browsing","inbox")
                 button("Open inbox","Browse active notifications on the real island"){requestIsland("inbox")}
                 button("Apps & exclusions","Per-app filtering from the Android integration settings"){startActivity(Intent(this,MainActivity::class.java))}
