@@ -733,6 +733,7 @@ class CutoutNotificationListenerService : NotificationListenerService() {
                     progress = getProgressDataOrNull(sbn)?.takeIf { !it.isComplete && it.max > 0 }?.let { it.current.toFloat()/it.max },
                     progressIndeterminate = getProgressDataOrNull(sbn)?.isIndeterminate == true,
                     silent = isSilentNotification(sbn,rankingMap),
+                    body = sbn.notification.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.take(240).orEmpty(),
                 )
             },
         )
