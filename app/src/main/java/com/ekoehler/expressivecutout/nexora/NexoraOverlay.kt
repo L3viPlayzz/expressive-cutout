@@ -607,12 +607,12 @@ class NexoraOverlay(private val service: AccessibilityService) {
             val small=min(min(dp(20f),topHeight-dp(8f)),(cameraX-cameraRadius-dp(13f)).coerceAtLeast(0f)).coerceAtLeast(0f)
             val artSize=small+(dp(43f)-small)*t
             val artX=dp(9f)+dp(12f)*t
-            val artY=(cameraY-small/2)*(1f-t)+(topHeight-dp(5f))*t
+            val morphArtY=(cameraY-small/2)*(1f-t)+(topHeight-dp(5f))*t
             val artRadius=small*.26f+(dp(10f)-small*.26f)*t
             val artAlpha=((w-dp(82f))/dp(40f)).coerceIn(0f,1f)
             if(artSize>0f && artAlpha>0f) {
                 if(artAlpha<.999f)canvas.saveLayerAlpha(0f,0f,w,h,(artAlpha*255).toInt()) else canvas.save()
-                album(canvas,artX,artY,artSize,artRadius)
+                album(canvas,artX,morphArtY,artSize,artRadius)
                 canvas.restore()
             }
             val compactAlpha=(1f-expansion*1.9f).coerceIn(0f,1f)*((w-dp(82f))/dp(40f)).coerceIn(0f,1f)
@@ -775,9 +775,10 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 } ?: "Timer"
                 else -> card.title
             }
-            if(card.kind=="progress" && card.progress!=null){
+            val compactProgress=card.progress
+            if(card.kind=="progress" && compactProgress!=null){
                 val leftBar=right; val rightBar=w-dp(12f);val yy=cy+dp(7f)
-                if(rightBar>leftBar){color(0xFF292929.toInt());canvas.drawRoundRect(leftBar,yy,rightBar,yy+dp(2f),dp(1f),dp(1f),paint);gradient(leftBar,yy,rightBar-leftBar,dp(2f));canvas.drawRoundRect(leftBar,yy,leftBar+(rightBar-leftBar)*card.progress.coerceIn(0f,1f),yy+dp(2f),dp(1f),dp(1f),paint)}
+                if(rightBar>leftBar){color(0xFF292929.toInt());canvas.drawRoundRect(leftBar,yy,rightBar,yy+dp(2f),dp(1f),dp(1f),paint);gradient(leftBar,yy,rightBar-leftBar,dp(2f));canvas.drawRoundRect(leftBar,yy,leftBar+(rightBar-leftBar)*compactProgress.coerceIn(0f,1f),yy+dp(2f),dp(1f),dp(1f),paint)}
             }
             if (card.kind == "energy") {
                 val labelX=max(right,cameraX+(w-cameraX)*.28f)
