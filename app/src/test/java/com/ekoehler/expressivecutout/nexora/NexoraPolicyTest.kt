@@ -4,6 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NexoraPolicyTest {
+    @Test fun stableScreenGestures() {
+        assertEquals(0,NexoraPolicy.gesture(0f,0f,30f,150))
+        assertEquals(1,NexoraPolicy.gesture(-50f,3f,30f,150))
+        assertEquals(-1,NexoraPolicy.gesture(50f,3f,30f,150))
+        assertEquals(2,NexoraPolicy.gesture(1f,-50f,30f,150))
+        assertEquals(3,NexoraPolicy.gesture(45f,45f,30f,150))
+        assertEquals(4,NexoraPolicy.gesture(1f,2f,30f,600))
+    }
     @Test fun retargetMotionIsBoundedAndLandsAtRest() {
         for(slope in listOf(0f,.4f,1f,2f,2.8f,3.5f)){
             var last=0f

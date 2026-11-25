@@ -34,6 +34,17 @@ internal object NexoraPolicy {
     }
     fun glyphSize(requested:Float,room:Float,height:Float):Float =
         minOf(requested,room,height).coerceAtLeast(0f)
+    /** Gestures use screen coordinates, never coordinates of the animated window. */
+    fun gesture(dx:Float,dy:Float,slop:Float,heldMs:Long):Int {
+        val x=kotlin.math.abs(dx);val y=kotlin.math.abs(dy)
+        return when {
+            x>=slop && x>y*1.35f -> if(dx<0f)1 else -1
+            dy<=-slop && y>x*1.35f -> 2
+            x>slop || y>slop -> 3
+            heldMs>=500L -> 4
+            else -> 0
+        }
+    }
     fun smoothstep(fraction:Float):Float {
         val t=fraction.coerceIn(0f,1f)
         return t*t*(3f-2f*t)

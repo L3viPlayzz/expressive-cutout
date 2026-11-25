@@ -381,8 +381,7 @@ class NexoraActivity : Activity() {
             "inbox"->{
                 pageFrame("Inbox","Active notifications on your device. Nothing is stored.")
                 val items=NotificationInboxBus.items.value
-                if(items.isEmpty())add(label("All caught up",20f,muted,true))
-                else items.forEach{item->
+                items.forEach{item->
                     button(if(prefs.getBoolean("message_text",true))item.title.ifBlank{item.appName}else item.appName,item.appName){
                         CutoutNotificationListenerService.openFromInbox(item.key)
                     }
