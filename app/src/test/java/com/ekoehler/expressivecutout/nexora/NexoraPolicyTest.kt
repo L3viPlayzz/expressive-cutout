@@ -4,6 +4,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NexoraPolicyTest {
+    @Test fun foregroundIntegrationAndShadeGesture() {
+        assertTrue(NexoraPolicy.hideDuplicate(true,"player","player"))
+        assertFalse(NexoraPolicy.hideDuplicate(false,"player","player"))
+        assertFalse(NexoraPolicy.hideDuplicate(true,"launcher","player"))
+        assertFalse(NexoraPolicy.hideDuplicate(true,null,null))
+        assertEquals(5,NexoraPolicy.gesture(1f,50f,30f,150))
+    }
     @Test fun stableScreenGestures() {
         assertEquals(0,NexoraPolicy.gesture(0f,0f,30f,150))
         assertEquals(1,NexoraPolicy.gesture(-50f,3f,30f,150))

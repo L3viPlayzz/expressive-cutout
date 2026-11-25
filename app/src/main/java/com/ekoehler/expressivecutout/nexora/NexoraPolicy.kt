@@ -3,6 +3,7 @@ package com.ekoehler.expressivecutout.nexora
 /** Pure, testable rules used by the renderer and calibration screen. */
 internal object NexoraPolicy {
     fun canDraw(interactive:Boolean, displayOn:Boolean):Boolean = interactive && displayOn
+    fun hideDuplicate(enabled:Boolean,foreground:String?,source:String?):Boolean=enabled && source!=null && foreground==source
     fun expandedMillis(seconds:Int):Long = seconds.coerceIn(1,8)*1000L
     fun compactMillis(seconds:Int):Long = seconds.coerceIn(0,10)*1000L
     fun shouldCollapse(now:Long, deadline:Long, ringing:Boolean):Boolean =
@@ -40,6 +41,7 @@ internal object NexoraPolicy {
         return when {
             x>=slop && x>y*1.35f -> if(dx<0f)1 else -1
             dy<=-slop && y>x*1.35f -> 2
+            dy>=slop && y>x*1.35f -> 5
             x>slop || y>slop -> 3
             heldMs>=500L -> 4
             else -> 0

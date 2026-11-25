@@ -12,6 +12,10 @@ import com.ekoehler.expressivecutout.data.StatusBarHideMode
 import com.ekoehler.expressivecutout.data.StatusBarPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import com.ekoehler.expressivecutout.nexora.NexoraCalibration
 import kotlinx.coroutines.launch
 import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
@@ -101,26 +105,28 @@ object StatusBarIconController {
                 preferences.silenceAlerts,
                 ShizukuState.status,
                 CutoutWidthBus.kind,
-                combine(CutoutWidthBus.grownForDots, CutoutWidthBus.grownForStatusDot) { trailing, leading ->
-                    trailing to leading
+                combine(CutoutWidthBus.grownForDots, CutoutWidthBus.grownForStatusDot, NexoraCalibration.integrationEnabled) { trailing, leading, enabled ->
+                    Triple(trailing,leading,enabled)
                 },
-            ) { chosen, silenceAlerts, status, kind, (grownForDots, grownForStatusDot) ->
-                Wish(chosen.resolve(kind, grownForDots, grownForStatusDot), silenceAlerts, status)
+            ) { chosen, silenceAlerts, status, kind, (grownForDots, grownForStatusDot, enabled) ->
+                if(enabled)Wish(chosen.resolve(kind, grownForDots, grownForStatusDot), silenceAlerts, status)
+                else Wish(Hiding(false,false,false),false,status)
             }
-                .collect { wish ->
+                .distinctUntilChanged()
+            .collect { wish ->
                     if (wish.status != ShizukuStatus.READY) {
                         // A dead Shizuku also invalidates the cached proxy; drop it so the next
                         // successful call rebuilds one over the fresh binder.
                         service = null
                         return@collect
                     }
-                    apply(
+                    withContext(Dispatchers.IO){apply(
                         wish.hiding.hideIcons,
                         wish.hiding.hideSystemInfo,
                         wish.hiding.hideClock,
                         wish.silenceAlerts,
                         packageName,
-                    )
+                    )}
                 }
         }
     }

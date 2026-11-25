@@ -313,6 +313,7 @@ class NexoraActivity : Activity() {
             "activities"->{
                 pageFrame("Live activities","Choose what can appear on the Island.")
                 toggle("Sound Flow","Album art, transport and playback progress","music")
+                toggle("Hide in music app","Avoid duplicate controls while the player is open","hide_in_player")
                 toggle("Timers","Supported clock app timers and stopwatches","timers")
                 toggle("Signature events","Master switch for system events","events")
                 heading("SYSTEM EVENTS")
@@ -323,6 +324,7 @@ class NexoraActivity : Activity() {
                 toggle("Wake island","Show the compact lock while the lock screen is awake, never on AOD","lock_wake")
                 toggle("Other system events","USB, debugging and ringer mode","event_system")
                 heading("CALLS")
+                toggle("Hide active call in dialer","Keep the full phone app unobstructed; incoming calls still get priority","hide_in_dialer")
                 add(label("Incoming calls always get priority. Supported answer and decline actions stay available until the dialer confirms the call state.",14f,muted))
             }
             "notifications"->{
@@ -392,6 +394,7 @@ class NexoraActivity : Activity() {
                 pageFrame("Gestures & controls","Stay in control without opening another app.")
                 toggle("Swipe horizontally","Switch between live activities","swipe_switch")
                 toggle("Swipe up","Dismiss the temporary island view","swipe_close")
+                toggle("Swipe down","Open Android notifications from the compact island","swipe_shade")
                 toggle("Hold for Quick Controls","Long press opens volume and shortcuts instead of inbox","hold_hub",false)
                 button("Open Quick Controls","Media volume • Android quick settings • inbox"){requestIsland("hub")}
                 heading("TOUCH")
