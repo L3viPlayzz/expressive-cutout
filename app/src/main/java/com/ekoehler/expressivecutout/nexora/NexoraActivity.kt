@@ -296,7 +296,7 @@ class NexoraActivity : Activity() {
                 }
             }
             "motion"->{
-                pageFrame("Motion","Make the island feel natural, not busy.")
+                pageFrame("Motion","Continuity Motion • shared elements, fluid geometry and signature effects.")
                 choice("Animation tempo","motion_speed",listOf("Fast" to 75,"Fluid" to 100,"Gentle" to 130),100)
                 adjustment("Expanded duration","expand_seconds",1,8,3," s")
                 adjustment("Compact event duration","compact_seconds",0,10,3," s")
@@ -304,10 +304,10 @@ class NexoraActivity : Activity() {
                 toggle("Reduced motion","Short transitions and static waveform","reduce_motion",false)
                 heading("MOTION LAB")
                 button("Notification Morph","Try a sample notification without sending one"){requestIsland("demo_message")}
-                button("Energy Flow","Preview the kinetic charging animation at 84%"){requestIsland("demo_charge")}
+                button("Energy Flow","Preview the orbit, lightning and morphing battery meter at 84%"){requestIsland("demo_charge")}
                 button("Connect Pulse","Preview a Wi-Fi connection"){preview(SystemEventType.WIFI_CONNECTED)}
                 button("Wake Signature","Preview the locked-state capsule"){requestIsland("demo_lock")}
-                button("Unlock Signature","Preview the animated opening lock and green confirmation"){requestIsland("demo_unlock")}
+                button("Unlock Signature","Preview the orbit, opening lock and traced green check"){requestIsland("demo_unlock")}
                 button("Sound Flow","Live music layout with sample artwork"){calibrating=true;calibrationMode=2;drawCalibration()}
             }
             "activities"->{

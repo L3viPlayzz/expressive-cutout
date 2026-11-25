@@ -4,6 +4,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NexoraPolicyTest {
+    @Test fun fluidAxesStayInsideHostWindow() {
+        for(vertical in listOf(false,true)) for(opening in listOf(false,true)) {
+            assertEquals(0f,NexoraPolicy.morphAxis(0f,vertical,opening),.0001f)
+            assertEquals(1f,NexoraPolicy.morphAxis(1f,vertical,opening),.0001f)
+            var previous=0f
+            for(i in 0..100) {
+                val value=NexoraPolicy.morphAxis(i/100f,vertical,opening)
+                assertTrue(value in 0f..1f)
+                assertTrue(value>=previous)
+                previous=value
+            }
+        }
+        assertEquals(0f,NexoraPolicy.phase(.1f,.2f,.8f),.0001f)
+        assertEquals(1f,NexoraPolicy.phase(.9f,.2f,.8f),.0001f)
+    }
     @Test fun onlyInteractiveDisplayCanDraw() {
         assertTrue(NexoraPolicy.canDraw(true,true))
         assertFalse(NexoraPolicy.canDraw(false,true))
