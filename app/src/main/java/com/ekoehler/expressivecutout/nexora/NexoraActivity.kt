@@ -296,7 +296,7 @@ class NexoraActivity : Activity() {
                 }
             }
             "motion"->{
-                pageFrame("Motion","Continuity Motion • shared elements, fluid geometry and signature effects.")
+                pageFrame("Motion","Beyond the Island • Momentum motion, camera-safe shared elements and signature effects.")
                 choice("Animation tempo","motion_speed",listOf("Fast" to 75,"Fluid" to 100,"Gentle" to 130),100)
                 adjustment("Expanded duration","expand_seconds",1,8,3," s")
                 adjustment("Compact event duration","compact_seconds",0,10,3," s")
@@ -347,11 +347,13 @@ class NexoraActivity : Activity() {
                 }
                 add(search);add(container)
                 val pm=packageManager
-                val apps=pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),0)
-                    .map{it.activityInfo.packageName to it.loadLabel(pm).toString()}.distinctBy{it.first}.filter{it.first!=packageName}.sortedBy{it.second.lowercase()}
                 val store=com.ekoehler.expressivecutout.data.AppPreferences(this)
                 val epoch=pageEpoch
                 mainScope.launch {
+                    val apps=withContext(Dispatchers.IO){
+                        pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),0)
+                            .map{it.activityInfo.packageName to it.loadLabel(pm).toString()}.distinctBy{it.first}.filter{it.first!=packageName}.sortedBy{it.second.lowercase()}
+                    }
                     val disabled=store.disabledPackages.first().toMutableSet()
                     fun fill(q:String){
                         container.removeAllViews()

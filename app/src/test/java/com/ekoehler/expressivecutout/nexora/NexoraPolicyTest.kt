@@ -4,6 +4,23 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NexoraPolicyTest {
+    @Test fun retargetMotionIsBoundedAndLandsAtRest() {
+        for(slope in listOf(0f,.4f,1f,2f,2.8f,3.5f)){
+            var last=0f
+            for(i in 0..100){
+                val v=NexoraPolicy.motionPosition(i/100f,slope)
+                assertTrue(v in 0f..1f)
+                assertTrue(v>=last-.00001f)
+                last=v
+            }
+            assertEquals(1f,last,.00001f)
+            assertEquals(0f,NexoraPolicy.motionVelocity(1f,slope),.00001f)
+        }
+        assertEquals(1f,NexoraPolicy.initialSlope(100f,.25f,400),.0001f)
+        assertEquals(0f,NexoraPolicy.initialSlope(-100f,.25f,400),.0001f)
+        assertEquals(0f,NexoraPolicy.glyphSize(20f,-1f,24f),.0001f)
+        assertEquals(12f,NexoraPolicy.glyphSize(22f,12f,20f),.0001f)
+    }
     @Test fun fluidAxesStayInsideHostWindow() {
         for(vertical in listOf(false,true)) for(opening in listOf(false,true)) {
             assertEquals(0f,NexoraPolicy.morphAxis(0f,vertical,opening),.0001f)

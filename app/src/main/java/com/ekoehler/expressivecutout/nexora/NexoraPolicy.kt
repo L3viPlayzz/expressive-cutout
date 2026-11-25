@@ -19,6 +19,21 @@ internal object NexoraPolicy {
         val q=((u-lead)/(1f-lead)).coerceIn(0f,1f)
         return q*q*(3f-2f*q)
     }
+    // Monotone Hermite motion: retain useful incoming velocity on a retarget,
+    // land at zero velocity, and never overshoot the allocated window.
+    fun initialSlope(delta:Float,velocity:Float,durationMs:Long):Float =
+        if(kotlin.math.abs(delta)<.01f)0f else (velocity*durationMs/delta).coerceIn(0f,2.8f)
+    fun motionPosition(t:Float,slope:Float):Float {
+        val q=t.coerceIn(0f,1f)
+        val s=slope.coerceIn(0f,2.8f)
+        return (q*q*(3f-2f*q)+s*q*(1f-q)*(1f-q)).coerceIn(0f,1f)
+    }
+    fun motionVelocity(t:Float,slope:Float):Float {
+        val q=t.coerceIn(0f,1f)
+        return (6f*q*(1f-q)+slope.coerceIn(0f,2.8f)*(1f-q)*(1f-3f*q)).coerceAtLeast(0f)
+    }
+    fun glyphSize(requested:Float,room:Float,height:Float):Float =
+        minOf(requested,room,height).coerceAtLeast(0f)
     fun smoothstep(fraction:Float):Float {
         val t=fraction.coerceIn(0f,1f)
         return t*t*(3f-2f*t)
