@@ -31,6 +31,10 @@ jobs:
       - name: Assemble debug
         run: ./gradlew assembleDebug --no-daemon
 
+      - name: Test NEXORA motion and timing policy
+        if: github.ref_name == 'nexora-reborn'
+        run: ./gradlew testDebugUnitTest --tests "com.ekoehler.expressivecutout.nexora.NexoraPolicyTest" --no-daemon
+
       - name: Lint
         continue-on-error: true
         run: ./gradlew lintDebug --no-daemon

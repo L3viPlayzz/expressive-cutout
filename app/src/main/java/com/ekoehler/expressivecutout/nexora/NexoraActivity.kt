@@ -180,7 +180,7 @@ class NexoraActivity : Activity() {
     private fun drawPage(){
         when(page){
             "home" -> {
-                pageFrame("N E X O R A","STUDIO  /  REBORN")
+                pageFrame("N E X O R A","STUDIO  /  1.2")
                 val status=LinearLayout(this).apply{
                     orientation=LinearLayout.VERTICAL
                     background=GradientDrawable(GradientDrawable.Orientation.TL_BR,intArrayOf(0xFF152438.toInt(),0xFF201A35.toInt())).apply{cornerRadius=dp(25).toFloat()}
@@ -225,6 +225,7 @@ class NexoraActivity : Activity() {
                 toggle("Haptic touch","Subtle system feedback on island touches","haptics")
                 toggle("Reduced motion","Short transitions and static waveform","reduce_motion",false)
                 heading("MOTION LAB")
+                button("Notification Morph","Try a sample notification without sending one"){requestIsland("demo_message")}
                 button("Energy Flow","Preview a charge at 84%"){preview(SystemEventType.CHARGING_STARTED,84)}
                 button("Connect Pulse","Preview a Wi-Fi connection"){preview(SystemEventType.WIFI_CONNECTED)}
                 button("Unlock Signature","Preview confirmed-unlock effect only"){preview(SystemEventType.DEVICE_UNLOCKED)}

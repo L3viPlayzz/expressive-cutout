@@ -48,8 +48,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private var plugged = false
     private val audio = service.getSystemService(android.media.AudioManager::class.java)
     private fun enabled(key:String, fallback:Boolean=true)=prefs.getBoolean(key,fallback)
-    private fun expandedMs()=prefs.getInt("expand_seconds",3).coerceIn(1,8)*1000L
-    private fun compactMs()=prefs.getInt("compact_seconds",3).coerceIn(0,10)*1000L
+    private fun expandedMs()=NexoraPolicy.expandedMillis(prefs.getInt("expand_seconds",3))
+    private fun compactMs()=NexoraPolicy.compactMillis(prefs.getInt("compact_seconds",3))
     private fun refreshBattery(intent:android.content.Intent?) {
         if(intent==null)return
         val level=intent.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL,-1)
@@ -182,6 +182,10 @@ class NexoraOverlay(private val service: AccessibilityService) {
         scope.launch { NexoraCalibration.mode.collect { render() } }
         scope.launch { NexoraCalibration.requests.collect { request ->
             if(!ringing() && !keyguard.isKeyguardLocked && enabled("enabled")) {
+                if(request=="demo_message") {
+                    show(Card("message","NEXORA preview","Your notification animation",BLUE,appIcon=runCatching{service.packageManager.getApplicationIcon(service.packageName)}.getOrNull()))
+                    return@collect
+                }
                 flash=null; pending.clear(); autoCollapseAt=0L; expanded=true; hub=request=="hub"; browsing=request=="inbox"; selection=0
                 autoFocus=if(hub)"hub" else if(NotificationInboxBus.items.value.any{it.progress==null})"message" else "progress"; render()
             }
@@ -254,7 +258,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             else Card("music", "Midnight Drive", "Now playing", VIOLET, progress = .60f)
         )
         val now=SystemClock.uptimeMillis()
-        if(!ringing() && autoCollapseAt!=0L && now>=autoCollapseAt){
+        if(NexoraPolicy.shouldCollapse(now,autoCollapseAt,ringing())){
             autoCollapseAt=0L; expanded=false
         }
         if(now>=flashUntil || flash?.packageName?.let{it in mutedApps}==true) flash=null
@@ -322,7 +326,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         val startAlpha=v.alpha
         geometry=ValueAnimator.ofFloat(0f,1f).apply {
             val base=if(dismiss)220L else if(h>fromH+dp(10f))340L else if(h<fromH-dp(10f))280L else 270L
-            duration=if(enabled("reduce_motion",false)) 100L else (base*prefs.getInt("motion_speed",100).coerceIn(60,150)/100L)
+            duration=NexoraPolicy.motionMillis(base,prefs.getInt("motion_speed",100),enabled("reduce_motion",false))
             interpolator=if(dismiss || h<fromH-dp(10f))closeCurve else morphCurve
             addUpdateListener { a ->
                 val t=a.animatedValue as Float
@@ -377,7 +381,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         val cameraRadius = max(dp(6f), (cutout?.width() ?: 0f) / 2f + dp(1.5f))
         physicalY = cutout?.centerY() ?: dp(17f)
         val cameraHalfHeight = (cutout?.height()?.div(2f) ?: dp(6f)) + dp(1.5f)
-        val topHeight = max(dp(requestedHeight.toFloat()).roundToInt(),ceil(cameraHalfHeight*2).toInt())
+        val topHeight = NexoraPolicy.safeHeight(dp(requestedHeight.toFloat()).roundToInt(),ceil(cameraHalfHeight*2).toInt())
         val minY=ceil(physicalY+cameraHalfHeight-topHeight).toInt().coerceAtLeast(0)
         val maxY=floor(physicalY-cameraHalfHeight).toInt().coerceAtLeast(minY)
         // Center the thin capsule on the camera, instead of filling the whole status bar.
@@ -597,11 +601,23 @@ class NexoraOverlay(private val service: AccessibilityService) {
             }
         }
         private fun musicLayout(canvas: Canvas,w:Float,h:Float,expansion:Float,age:Float) {
+            // A single album cover travels between compact and expanded geometry.
+            // Its corners and size morph together, rather than fading between duplicate images.
+            val t=NexoraPolicy.smoothstep(expansion)
+            val small=min(min(dp(20f),topHeight-dp(8f)),(cameraX-cameraRadius-dp(13f)).coerceAtLeast(0f)).coerceAtLeast(0f)
+            val artSize=small+(dp(43f)-small)*t
+            val artX=dp(9f)+dp(12f)*t
+            val artY=(cameraY-small/2)*(1f-t)+(topHeight-dp(5f))*t
+            val artRadius=small*.26f+(dp(10f)-small*.26f)*t
+            val artAlpha=((w-dp(82f))/dp(40f)).coerceIn(0f,1f)
+            if(artSize>0f && artAlpha>0f) {
+                if(artAlpha<.999f)canvas.saveLayerAlpha(0f,0f,w,h,(artAlpha*255).toInt()) else canvas.save()
+                album(canvas,artX,artY,artSize,artRadius)
+                canvas.restore()
+            }
             val compactAlpha=(1f-expansion*1.9f).coerceIn(0f,1f)*((w-dp(82f))/dp(40f)).coerceIn(0f,1f)
             if(compactAlpha>0f) {
                 if(compactAlpha<.999f) canvas.saveLayerAlpha(0f,0f,w,h,(compactAlpha*255).toInt()) else canvas.save()
-                val s=min(min(dp(20f),topHeight-dp(8f)),(cameraX-cameraRadius-dp(13f)).coerceAtLeast(0f)).coerceAtLeast(0f)
-                if(s>0f) album(canvas,dp(9f),cameraY-s/2,s,s*.26f)
                 val playing=!enabled("reduce_motion",false) && (preview || NowPlayingBus.state.value?.isPlaying==true)
                 val waveW=dp(23f)
                 val start=max(cameraX+cameraRadius+dp(5f),w-dp(10f)-waveW)
@@ -623,7 +639,6 @@ class NexoraOverlay(private val service: AccessibilityService) {
             val margin=dp(21f)
             val art=dp(43f)
             val artY=y-dp(5f)
-            album(canvas,margin,artY,art,dp(10f))
             val tx=margin+art+dp(14f)
             text(canvas,card.title,tx,artY+dp(16f),15f,Color.WHITE,w-tx-margin,true)
             text(canvas,card.detail.ifBlank{"Now playing"},tx,artY+dp(34f),12f,0xFF9DA1AA.toInt(),w-tx-margin)
