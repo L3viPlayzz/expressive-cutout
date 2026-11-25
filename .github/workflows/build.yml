@@ -3,9 +3,9 @@ name: Build
 
 on:
   push:
-    branches: [main, dev, xtreme-v1, nexora-reborn]
+    branches: [main, dev, xtreme-v1, nexora-reborn, nexora-momentum]
   pull_request:
-    branches: [main, dev, xtreme-v1, nexora-reborn]
+    branches: [main, dev, xtreme-v1, nexora-reborn, nexora-momentum]
   workflow_dispatch:
 
 concurrency:
@@ -32,7 +32,7 @@ jobs:
         run: ./gradlew assembleDebug --no-daemon
 
       - name: Test NEXORA motion and timing policy
-        if: github.ref_name == 'nexora-reborn'
+        if: github.ref_name == 'nexora-reborn' || github.ref_name == 'nexora-momentum'
         run: ./gradlew testDebugUnitTest --tests "com.ekoehler.expressivecutout.nexora.NexoraPolicyTest" --no-daemon
 
       - name: Lint
