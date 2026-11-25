@@ -44,6 +44,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private var mutedApps:Set<String> = emptySet()
     private fun focused()=enabled("focus_mode",false)
     private var batteryLevel = -1
+    private val progressKeys=mutableSetOf<String>()
     private var plugged = false
     private val audio = service.getSystemService(android.media.AudioManager::class.java)
     private fun enabled(key:String, fallback:Boolean=true)=prefs.getBoolean(key,fallback)
@@ -136,6 +137,10 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     // The listener is configured not to hold notifications in Reborn.
                     if (!focused() && signal.packageName !in mutedApps && enabled("notifications") && !keyguard.isKeyguardLocked && (!signal.isSilent || enabled("silent_notifications"))) {
                         val p = signal.progressData
+                        val live=p!=null && !p.isComplete && enabled("live_progress")
+                        val duplicate=live && signal.key?.let{!progressKeys.add(it)}==true
+                        if(duplicate && flash?.key!=signal.key) return@collect
+                        if(p?.isComplete==true)signal.key?.let{progressKeys.remove(it)}
                         show(Card(if(p!=null && !p.isComplete && enabled("live_progress"))"progress" else "message", if(enabled("message_text"))signal.title ?: signal.appName ?: "Notification" else signal.appName ?: "Notification",
                             if(enabled("message_text")) signal.text ?: signal.appName.orEmpty() else signal.appName.orEmpty(), BLUE, signal.contentIntent, signal.key,
                             p?.takeIf { it.max > 0 }?.let { it.current.toFloat() / it.max },
@@ -198,7 +203,11 @@ class NexoraOverlay(private val service: AccessibilityService) {
         } }
         scope.launch { RunningTimerBus.state.collect { render() } }
         scope.launch { DeviceLockBus.locked.collect { if (it) { flash = null; pending.clear(); hub=false; browsing = false; expanded = false; autoCollapseAt=0L; autoFocus=null }; render() } }
-        scope.launch { NotificationInboxBus.items.collect { if (browsing || enabled("live_progress")) render() } }
+        scope.launch { NotificationInboxBus.items.collect { items ->
+            val active=items.filter{it.progress!=null || it.progressIndeterminate}.mapTo(mutableSetOf()){it.key}
+            progressKeys.retainAll(active)
+            if (browsing || enabled("live_progress")) render()
+        } }
         render()
     }
     private fun openLive(kind: String) {
@@ -248,8 +257,10 @@ class NexoraOverlay(private val service: AccessibilityService) {
         if(!ringing() && autoCollapseAt!=0L && now>=autoCollapseAt){
             autoCollapseAt=0L; expanded=false
         }
-        if(now>=flashUntil || flash?.packageName in mutedApps) flash=null
+        if(now>=flashUntil || flash?.packageName?.let{it in mutedApps}==true) flash=null
+        if(flash?.kind in listOf("message","progress") && !enabled("notifications"))flash=null
         if(focused()){flash=null;pending.clear()}
+        pending.removeAll{(_,card)->card.packageName?.let{it in mutedApps}==true || (card.kind in listOf("message","progress") && !enabled("notifications"))}
         if(flash?.kind=="progress" && !enabled("live_progress"))flash=null
         while(pending.isNotEmpty() && now-pending.peekFirst()!!.first>30000L)pending.removeFirst()
         if(!locked && !ringing() && !hub && !browsing && (flash==null || (autoCollapseAt==0L && pending.isNotEmpty())) && pending.isNotEmpty()) activate(pending.removeFirst().second,now)
@@ -625,7 +636,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 gradient(margin,barY,w-2*margin,0f)
                 canvas.drawRoundRect(margin,barY,end,barY+dp(3.5f),dp(1.75f),dp(1.75f),paint)
             }
-            val buttonsY=y+dp(73f)
+            val buttonsY=y+dp(73f)+dp(7f)*(1f-a)
             transport(canvas,w*.34f,buttonsY,-1,dp(18f))
             transport(canvas,w*.50f,buttonsY,0,dp(18f))
             transport(canvas,w*.66f,buttonsY,1,dp(18f))
