@@ -615,6 +615,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         private val effectPath = Path()
         private val effectMeasure = PathMeasure()
         private val effectSegment = Path()
+        private val chargeSweep=LinearGradient(0f,0f,1f,0f,intArrayOf(0x00FFFFFF,0x8FFFFFFF.toInt(),0x00FFFFFF),null,Shader.TileMode.CLAMP)
         private val chargeGradient = LinearGradient(0f,0f,1f,0f,intArrayOf(0xFF239A70.toInt(),0xFF59EBA4.toInt(),0xFFB4FFE0.toInt()),null,Shader.TileMode.CLAMP)
         private val normalTypeface = Typeface.create("sans-serif", Typeface.NORMAL)
         private val mediumTypeface = Typeface.create("sans-serif", Typeface.BOLD)
@@ -805,8 +806,16 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 if(isEnergy){
                     val level=card.progress
                     val amount=if(level!=null)level.coerceIn(0f,1f)*orbit else orbit
+                    // The charge current travels in two overlapping bands. A bright leading
+                    // segment settles into a quiet progress arc rather than flashing.
                     color(tone,230);paint.style=Paint.Style.STROKE;paint.strokeWidth=2.5f
                     canvas.drawArc(-21f,-21f,21f,21f,-90f,360f*amount,false,paint)
+                    if(!reduced && amount>0f && age<1.15f){
+                        val sweep=min(360f*amount,55f)
+                        color(0xFFBCFFE1.toInt(),(200*(1f-NexoraPolicy.phase(age,.7f,1.15f))).toInt())
+                        paint.style=Paint.Style.STROKE;paint.strokeWidth=3.1f
+                        canvas.drawArc(-21f,-21f,21f,21f,-90f+360f*amount-sweep,sweep,false,paint)
+                    }
                     if(age<1.15f && age>.04f){
                         val angle=(-90f+360f*amount)*PI.toFloat()/180f
                         color(Color.WHITE,(180*(1f-NexoraPolicy.phase(age,.65f,1.15f))).toInt())
@@ -837,6 +846,17 @@ class NexoraOverlay(private val service: AccessibilityService) {
                         canvas.drawLine(0f,4f,0f,7f,paint)
                     }
                     if(check>0f){
+                        // Two short confirmation facets travel outward inside the ring,
+                        // then settle into the final check. No full-island flash.
+                        val spark=NexoraPolicy.phase(age,.48f,.85f)
+                        val decay=1f-NexoraPolicy.phase(age,.82f,1.15f)
+                        if(!reduced && decay>0f){
+                            color(GREEN,(185*decay).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.6f
+                            for(i in 0..1){
+                                val sign=if(i==0)-1f else 1f
+                                canvas.drawLine(sign*(11f+2f*spark),-10f-2f*spark,sign*(13f+3f*spark),-14f-2f*spark,paint)
+                            }
+                        }
                         color(GREEN);paint.style=Paint.Style.STROKE;paint.strokeWidth=3.4f;paint.strokeCap=Paint.Cap.ROUND;paint.strokeJoin=Paint.Join.ROUND
                         effectPath.reset();effectPath.moveTo(-9f,0f);effectPath.lineTo(-2f,7f);effectPath.lineTo(10f,-7f)
                         trace(canvas,effectPath,check)
@@ -872,6 +892,18 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     if(fill>l){
                         color(Color.WHITE);gradientMatrix.reset();gradientMatrix.setScale(r-l,bh);gradientMatrix.postTranslate(l,by);chargeGradient.setLocalMatrix(gradientMatrix);paint.shader=chargeGradient
                         canvas.drawRoundRect(l,by,fill,by+bh,bh/2,bh/2,paint);paint.shader=null
+                        if(!reduced && age<1.25f && fill-l>dp(8f)){
+                            canvas.save()
+                            rect.set(l,by,fill,by+bh);path.reset();path.addRoundRect(rect,bh/2,bh/2,Path.Direction.CW);canvas.clipPath(path)
+                            val sweepWidth=dp(34f)
+                            val travel=NexoraPolicy.phase(age,.22f,1.15f)
+                            val start=l-sweepWidth+(fill-l+sweepWidth)*travel
+                            color(Color.WHITE,(255*(1f-NexoraPolicy.phase(age,1.05f,1.25f))).toInt())
+                            gradientMatrix.reset();gradientMatrix.setScale(sweepWidth,bh);gradientMatrix.postTranslate(start,by)
+                            chargeSweep.setLocalMatrix(gradientMatrix);paint.shader=chargeSweep
+                            canvas.drawRect(start,by,start+sweepWidth,by+bh,paint);paint.shader=null
+                            canvas.restore()
+                        }
                     }
                 }
             } else if(unlocked){
@@ -972,7 +1004,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             canvas.clipPath(silhouette)
             // Reserve the physical camera area even while an icon travels between sizes.
             canvas.clipOutRect(cameraX-cameraRadius,cameraY-cameraRadius,cameraX+cameraRadius,cameraY+cameraRadius)
-            val reveal=if(reducedMotion)1f else (age/.18f).coerceIn(0f,1f)
+            val reveal=if(reducedMotion)1f else NexoraPolicy.phase(age,0f,.16f)
             if(reveal<.999f)canvas.saveLayerAlpha(0f,0f,w,h,((1f-(1f-reveal)*(1f-reveal))*255).toInt()) else canvas.save()
             try {
             // Reference has a pure black silhouette without a visible outline.
@@ -986,7 +1018,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 if(age<1.3f && !reducedMotion)postInvalidateOnAnimation()
                 return
             }
-            if (w < dp(82f)) { if(age<1.3f) postInvalidateOnAnimation(); return }
+            if (w < dp(82f)) { if(age<1.3f && !reducedMotion) postInvalidateOnAnimation(); return }
             val contentAlpha = ((w-dp(82f))/dp(38f)).coerceIn(0f,1f)
             if (contentAlpha < .999f) canvas.saveLayerAlpha(0f,0f,w,h,(contentAlpha*255).toInt()) else canvas.save()
             val left = dp(14f)
