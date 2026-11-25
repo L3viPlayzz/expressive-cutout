@@ -94,15 +94,49 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private val closeCurve = PathInterpolator(.32f, .0f, .20f, 1f)
     private val refresh = Runnable { render() }
     private val prefListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> render() }
+    private val displayManager = service.getSystemService(android.hardware.display.DisplayManager::class.java)
+    private var displayListenerRegistered = false
     private var screenReceiverRegistered = false
+    private var lastUnlockAt = -10000L
+    private var hadLockedScreen = false
+    private fun displayAwake():Boolean = power.isInteractive &&
+        displayManager?.getDisplay(Display.DEFAULT_DISPLAY)?.state == Display.STATE_ON
+    private val displayListener = object:android.hardware.display.DisplayManager.DisplayListener {
+        override fun onDisplayAdded(id:Int)=Unit
+        override fun onDisplayRemoved(id:Int){if(id==Display.DEFAULT_DISPLAY)remove()}
+        override fun onDisplayChanged(id:Int){
+            if(id==Display.DEFAULT_DISPLAY) {
+                if(!displayAwake()) { handler.removeCallbacks(refresh); remove() }
+                else render()
+            }
+        }
+    }
+    private fun confirmedUnlock(){
+        if(!displayAwake() || keyguard.isDeviceLocked || !enabled("enabled") || !enabled("events") || !enabled("event_unlock") || ringing())return
+        val now=SystemClock.uptimeMillis()
+        if(now-lastUnlockAt<1300L)return
+        lastUnlockAt=now
+        hadLockedScreen=false
+        if(focused())return
+        // A confirmed OS unlock, never an inferred face scan or a fake authentication prompt.
+        activate(Card("unlock","Unlocked","Device unlocked",GREEN),now)
+        render()
+    }
     private val screenReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: android.content.Intent?) {
             if (intent?.action == android.content.Intent.ACTION_SCREEN_OFF) {
                 handler.removeCallbacks(refresh)
-                pending.clear(); hub=false
+                pending.clear(); hub=false; hadLockedScreen=true
                 flash = null; expanded = false; browsing = false; current = null; autoCollapseAt = 0L; autoFocus = null
                 remove()
-            } else { if(intent?.action==android.content.Intent.ACTION_BATTERY_CHANGED) refreshBattery(intent); render() }
+            } else {
+                when(intent?.action){
+                    android.content.Intent.ACTION_BATTERY_CHANGED -> refreshBattery(intent)
+                    android.content.Intent.ACTION_SCREEN_ON -> if(keyguard.isDeviceLocked)hadLockedScreen=true else if(hadLockedScreen)confirmedUnlock()
+                    android.content.Intent.ACTION_USER_PRESENT -> if(hadLockedScreen)confirmedUnlock()
+                }
+                render()
+            }
         }
     }
     private data class Card(val kind: String, val title: String, val detail: String = "", val accent: Int = BLUE,
@@ -118,6 +152,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
 
     fun start() {
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
+        hadLockedScreen=keyguard.isDeviceLocked
+        displayListenerRegistered=runCatching{displayManager?.registerDisplayListener(displayListener,handler);displayManager!=null}.getOrDefault(false)
         val filter = android.content.IntentFilter().apply {
             addAction(android.content.Intent.ACTION_SCREEN_OFF)
             addAction(android.content.Intent.ACTION_SCREEN_ON)
@@ -149,6 +185,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 }
                 is CutoutSignal.System -> if (!focused() && prefs.getBoolean("events", true)) {
                     val t = signal.type.name
+                    if(t=="DEVICE_LOCKED"){hadLockedScreen=true;return@collect}
+                    if(t=="DEVICE_UNLOCKED"){confirmedUnlock();return@collect}
                     val kind = when {
                         t.startsWith("CHARGING") || t == "BATTERY_LOW" -> "energy"
                         t == "DEVICE_UNLOCKED" -> "unlock"
@@ -162,8 +200,12 @@ class NexoraOverlay(private val service: AccessibilityService) {
                         kind == "energy" || kind == "unlock" -> GREEN
                         else -> BLUE
                     }
+                    val charging=t=="CHARGING_STARTED" || t=="CHARGING_COMPLETE"
+                    val pct=signal.payload.collapsedBadgeText?.trim()?.removeSuffix("%")?.toIntOrNull()?.coerceIn(0,100)
+                        ?: batteryLevel.takeIf{it>=0}
                     show(Card(kind, signal.payload.title ?: service.getString(signal.type.labelRes),
-                        signal.payload.collapsedBadgeText ?: signal.payload.subtitle.orEmpty(), accent, settingsAction=signal.payload.actionIntentAction))
+                        if(charging && pct!=null)"$pct%" else signal.payload.collapsedBadgeText ?: signal.payload.subtitle.orEmpty(), accent,
+                        progress=if(charging)pct?.div(100f) else null, settingsAction=signal.payload.actionIntentAction))
                 }
                 is CutoutSignal.SystemEnded -> Unit
                 is CutoutSignal.Music -> {
@@ -182,6 +224,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
         scope.launch { NexoraCalibration.mode.collect { render() } }
         scope.launch { NexoraCalibration.requests.collect { request ->
             if(!ringing() && !keyguard.isKeyguardLocked && enabled("enabled")) {
+                if(request=="demo_unlock"){show(Card("unlock","Unlocked","Animation preview",GREEN));return@collect}
+                if(request=="demo_charge"){show(Card("energy","Charging","84%",GREEN,progress=.84f));return@collect}
+                if(request=="demo_lock"){show(Card("lock","Locked","Animation preview",VIOLET));return@collect}
                 if(request=="demo_message") {
                     show(Card("message","NEXORA preview","Your notification animation",BLUE,appIcon=runCatching{service.packageManager.getApplicationIcon(service.packageName)}.getOrNull()))
                     return@collect
@@ -206,7 +251,11 @@ class NexoraOverlay(private val service: AccessibilityService) {
             render()
         } }
         scope.launch { RunningTimerBus.state.collect { render() } }
-        scope.launch { DeviceLockBus.locked.collect { if (it) { flash = null; pending.clear(); hub=false; browsing = false; expanded = false; autoCollapseAt=0L; autoFocus=null }; render() } }
+        scope.launch { DeviceLockBus.locked.collect { locked ->
+            if(locked){hadLockedScreen=true;flash=null;pending.clear();hub=false;browsing=false;expanded=false;autoCollapseAt=0L;autoFocus=null}
+            else if(hadLockedScreen)confirmedUnlock()
+            render()
+        } }
         scope.launch { NotificationInboxBus.items.collect { items ->
             val active=items.filter{it.progress!=null || it.progressIndeterminate}.mapTo(mutableSetOf()){it.key}
             progressKeys.retainAll(active)
@@ -224,7 +273,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         render()
     }
     private fun show(card: Card) {
-        if(!enabled("enabled") || !power.isInteractive)return
+        if(!enabled("enabled") || !displayAwake())return
         // Incoming calls keep priority until answered or declined.
         val now=SystemClock.uptimeMillis()
         if(card.kind=="progress" && flash?.key!=card.key && NotificationInboxBus.items.value.any{it.key==card.key && (it.progress!=null || it.progressIndeterminate)} && current?.key==card.key){render();return}
@@ -272,6 +321,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             if(it.kind in setOf("message","progress") && !enabled("message_text")) result.add(it.copy(title=it.packageName?.let{pkg->runCatching{service.packageManager.getApplicationLabel(service.packageManager.getApplicationInfo(pkg,0)).toString()}.getOrNull()} ?: "Notification",detail="",actions=emptyList())) else result.add(it)
         }
         if (locked) {
+            if(enabled("lock_wake") && enabled("events") && enabled("event_unlock") && keyguard.isDeviceLocked && result.none{it.kind=="lock" || it.kind=="unlock"} && !ringing())result.add(Card("lock","Locked","Unlock your device",VIOLET))
             OnCallBus.state.value?.let { result.add(Card("call",if(it.ongoing)"On call" else "Incoming call",if(it.ongoing)"Call in progress" else "Unlock to view",GREEN)) }
             return result
         }
@@ -348,7 +398,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
 
     private fun render() {
         handler.removeCallbacks(refresh)
-        if ((!prefs.getBoolean("enabled", true) && NexoraCalibration.mode.value == 0) || !power.isInteractive || service.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_PORTRAIT) {
+        if ((!prefs.getBoolean("enabled", true) && NexoraCalibration.mode.value == 0) || !displayAwake() || service.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_PORTRAIT) {
             flash = null; pending.clear(); hub=false; expanded = false; browsing = false; autoCollapseAt=0L; autoFocus=null; remove(); return
         }
         val all = cards()
@@ -363,6 +413,10 @@ class NexoraOverlay(private val service: AccessibilityService) {
             if(callIndex>=0){selection=callIndex; expanded=true; autoCollapseAt=0L; autoFocus=null; browsing=false}
         }
         selection = selection.coerceIn(0, all.lastIndex)
+        if(keyguard.isKeyguardLocked && !ringing()) {
+            val lockIndex=all.indexOfFirst{it.kind=="unlock" || it.kind=="lock"}
+            if(lockIndex>=0){selection=lockIndex;if(all[lockIndex].kind=="lock")expanded=false}
+        }
         val next = all[selection]
         val changed = current?.kind != next.kind || current?.title != next.title || current?.key != next.key
         current = next
@@ -375,7 +429,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         }
         val cameraX = cutout?.centerX()?.roundToInt() ?: screenWidth / 2
         val preview = NexoraCalibration.mode.value.takeUnless { keyguard.isKeyguardLocked } ?: 0
-        val isExpanded = if (preview != 0) preview == 2 else expanded
+        val isExpanded = if (preview != 0) preview == 2 else expanded && !(next.kind=="lock" && keyguard.isKeyguardLocked)
         val scale = prefs.getInt("island_width",100).coerceIn(85,120)/100f
         val requestedHeight = prefs.getInt("island_height_v2",28).coerceIn(20,44)
         val cameraRadius = max(dp(6f), (cutout?.width() ?: 0f) / 2f + dp(1.5f))
@@ -386,7 +440,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         val maxY=floor(physicalY-cameraHalfHeight).toInt().coerceAtLeast(minY)
         // Center the thin capsule on the camera, instead of filling the whole status bar.
         anchorY=(physicalY-topHeight/2f+dp(prefs.getInt("island_y_v2",0).coerceIn(-10,10).toFloat())).roundToInt().coerceIn(minY,maxY)
-        val width = min(screenWidth - dp(12f).toInt(), dp((if (isExpanded) 324f else if (next.kind == "music") 136f else if (next.kind == "energy") 152f else 176f)*scale).toInt())
+        val width = min(screenWidth - dp(12f).toInt(), dp((if (isExpanded) 324f else if (next.kind == "music") 136f else if (next.kind == "energy") 152f else if(next.kind=="lock" || next.kind=="unlock") 144f else 176f)*scale).toInt())
         val height = topHeight + if (isExpanded) dp(100f).toInt() else 0
         centerX = cameraX
         val maxOffset = (width/2f-cameraRadius-dp(44f)).coerceAtLeast(0f)
@@ -400,10 +454,11 @@ class NexoraOverlay(private val service: AccessibilityService) {
         v.count = all.size
         v.index = selection
         v.open = isExpanded
+        val passive=keyguard.isKeyguardLocked
         if (params == null) {
             val seed = min(width, max(dp(28f).toInt(), (v.cameraRadius * 2 + dp(5f)).toInt()))
             val lp = WindowManager.LayoutParams(seed, topHeight, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or (if(passive)WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0),
                 PixelFormat.TRANSLUCENT)
             lp.gravity = Gravity.TOP or Gravity.LEFT
             lp.x = (anchorX - seed / 2).coerceIn(0,(screenWidth-seed).coerceAtLeast(0))
@@ -412,6 +467,10 @@ class NexoraOverlay(private val service: AccessibilityService) {
             lp.title = "NEXORA"
             try { wm.addView(v, lp); params = lp; targetWidth = 0; targetHeight = 0; place(v,lp.x.toFloat(),lp.y.toFloat(),seed.toFloat(),topHeight.toFloat()); v.alpha=if(preview!=0)1f else .2f; v.enter(); morph(v,width,height) } catch (_: Exception) { panel = null; params = null; return }
         } else {
+            params?.let{lp->
+                val flags=if(passive)lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+                if(flags!=lp.flags){lp.flags=flags;runCatching{wm.updateViewLayout(v,lp)}}
+            }
             if (leaving) { leaving = false; geometry?.cancel(); targetWidth = 0; targetHeight = 0; v.alpha = 1f }
             if (changed) v.enter()
             if (preview != 0) {
@@ -447,6 +506,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
     fun stop() {
         handler.removeCallbacksAndMessages(null)
         prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
+        if(displayListenerRegistered)runCatching{displayManager?.unregisterDisplayListener(displayListener)}
+        displayListenerRegistered=false
         if (screenReceiverRegistered) runCatching { service.unregisterReceiver(screenReceiver) }
         screenReceiverRegistered = false
         scope.cancel()
@@ -527,6 +588,10 @@ class NexoraOverlay(private val service: AccessibilityService) {
         private val rect = RectF()
         private val path = Path()
         private val silhouette = Path()
+        private val effectPath = Path()
+        private val effectMeasure = PathMeasure()
+        private val effectSegment = Path()
+        private val chargeGradient = LinearGradient(0f,0f,1f,0f,intArrayOf(0xFF239A70.toInt(),0xFF59EBA4.toInt(),0xFFB4FFE0.toInt()),null,Shader.TileMode.CLAMP)
         private val normalTypeface = Typeface.create("sans-serif", Typeface.NORMAL)
         private val mediumTypeface = Typeface.create("sans-serif", Typeface.BOLD)
         private val textPaint = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG)
@@ -661,8 +726,64 @@ class NexoraOverlay(private val service: AccessibilityService) {
             }
             canvas.restore()
         }
+        private fun trace(canvas:Canvas,source:Path,fraction:Float){
+            effectMeasure.setPath(source,false)
+            effectSegment.reset()
+            effectMeasure.getSegment(0f,effectMeasure.length*fraction.coerceIn(0f,1f),effectSegment,true)
+            canvas.drawPath(effectSegment,paint)
+        }
+        private fun unlockGlyph(canvas:Canvas,x:Float,y:Float,age:Float,unlocked:Boolean){
+            val reduce=enabled("reduce_motion",false)
+            val t=if(reduce)1f else NexoraPolicy.smoothstep(age/.65f)
+            val s=dp(1f).coerceAtMost(topHeight/24f)
+            val lift=if(unlocked)t else 0f
+            val bodyY=y+2*s
+            // The shackle rotates and lifts out of the body; then the checkmark is traced.
+            color(if(unlocked)GREEN else VIOLET)
+            paint.style=Paint.Style.STROKE;paint.strokeWidth=1.8f*s;paint.strokeCap=Paint.Cap.ROUND;paint.strokeJoin=Paint.Join.ROUND
+            canvas.save()
+            canvas.rotate(-36f*lift,x-4.5f*s,bodyY-2*s)
+            canvas.translate(0f,-3f*s*lift)
+            canvas.drawArc(x-4.5f*s,bodyY-12*s,x+4.5f*s,bodyY+1*s,180f,180f,false,paint)
+            canvas.drawLine(x-4.5f*s,bodyY-5.5f*s,x-4.5f*s,bodyY-1.5f*s,paint)
+            canvas.restore()
+            canvas.drawRoundRect(x-7*s,bodyY-2*s,x+7*s,bodyY+7*s,2.5f*s,2.5f*s,paint)
+            if(unlocked){
+                effectPath.reset();effectPath.moveTo(x-3*s,bodyY+2*s);effectPath.lineTo(x-0.7f*s,bodyY+4*s);effectPath.lineTo(x+3.5f*s,bodyY)
+                trace(canvas,effectPath,if(reduce)1f else ((age-.20f)/.40f).coerceIn(0f,1f))
+            } else canvas.drawLine(x,bodyY+1.5f*s,x,bodyY+3.8f*s,paint)
+            paint.style=Paint.Style.FILL
+        }
+        private fun cameraHalo(canvas:Canvas,cy:Float,age:Float,success:Boolean){
+            val ring=cameraRadius+dp(1.6f)
+            if(ring+dp(1f)>min(cy,topHeight-cy))return
+            val t=if(enabled("reduce_motion",false))1f else NexoraPolicy.smoothstep(age/.65f)
+            color(if(success)GREEN else VIOLET,if(success)230 else 170)
+            paint.style=Paint.Style.STROKE;paint.strokeWidth=dp(1.4f);paint.strokeCap=Paint.Cap.ROUND
+            if(success)canvas.drawArc(cameraX-ring,cy-ring,cameraX+ring,cy+ring,-90f,360f*t,false,paint)
+            else {
+                val rotation=if(enabled("reduce_motion",false))0f else min(age,1.3f)*220f
+                canvas.drawArc(cameraX-ring,cy-ring,cameraX+ring,cy+ring,-90f+rotation,100f+50f*t,false,paint)
+                color(BLUE,190);paint.style=Paint.Style.STROKE;paint.strokeWidth=dp(1.4f)
+                canvas.drawArc(cameraX-ring,cy-ring,cameraX+ring,cy+ring,90f+rotation,100f+50f*t,false,paint)
+            }
+            paint.style=Paint.Style.FILL
+        }
+        private fun chargeDetail(canvas:Canvas,w:Float,y:Float,age:Float,level:Float){
+            val t=if(enabled("reduce_motion",false))1f else NexoraPolicy.smoothstep((age-.12f)/.85f)
+            val l=dp(21f); val r=w-l; val by=y+dp(53f);val bh=dp(15f)
+            color(0xFF172923.toInt());canvas.drawRoundRect(l,by,r,by+bh,bh/2,bh/2,paint)
+            val fill=l+(r-l)*level.coerceIn(0f,1f)*t
+            if(fill>l){
+                color(Color.WHITE);gradientMatrix.reset();gradientMatrix.setScale((r-l).coerceAtLeast(1f),bh);gradientMatrix.postTranslate(l,by);chargeGradient.setLocalMatrix(gradientMatrix);paint.shader=chargeGradient
+                canvas.drawRoundRect(l,by,fill,by+bh,bh/2,bh/2,paint);paint.shader=null
+            }
+            if(t<1f && fill>l+dp(5f)){color(Color.WHITE,100);canvas.drawCircle(fill-dp(5f),by+bh/2,dp(2.2f),paint)}
+            text(canvas,"Battery level",l,y+dp(85f),11f,0xFF9DA1AA.toInt(),w-l*2)
+        }
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
+            if(!displayAwake())return
             val age = (SystemClock.uptimeMillis() - began) / 1000f
             val w = visualWidth; val h = visualHeight
             if(w<=0f || h<=0f)return
@@ -707,34 +828,17 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     }
                 }
                 "energy" -> {
-                    val pulse=(age/.40f).coerceIn(0f,1f)
-                    val settle=1f-(1f-pulse)*(1f-pulse)*(1f-pulse)
-                    canvas.save(); canvas.scale(.72f+.28f*settle,.72f+.28f*settle,iconX,cy)
-                    paint.alpha=(settle*255).toInt()
-                    path.reset(); path.moveTo(iconX+dp(2f),cy-dp(10f));path.lineTo(iconX-dp(6f),cy+dp(1f));path.lineTo(iconX,cy+dp(1f));path.lineTo(iconX-dp(2f),cy+dp(10f));path.lineTo(iconX+dp(7f),cy-dp(2f));path.lineTo(iconX+dp(1f),cy-dp(2f));path.close();canvas.drawPath(path,paint);canvas.restore()
-                    // Compact charge card: only the lightning glyph and true battery level.
+                    val t=if(enabled("reduce_motion",false))1f else NexoraPolicy.smoothstep(age/.48f)
+                    val s=min(dp(1f),topHeight/24f)
+                    canvas.save();canvas.scale(.7f+.3f*t,.7f+.3f*t,iconX,cy)
+                    effectPath.reset();effectPath.moveTo(iconX+2*s,cy-10*s);effectPath.lineTo(iconX-6*s,cy+1*s);effectPath.lineTo(iconX,cy+1*s);effectPath.lineTo(iconX-2*s,cy+10*s);effectPath.lineTo(iconX+7*s,cy-2*s);effectPath.lineTo(iconX+s,cy-2*s);effectPath.close()
+                    color(accent);paint.style=Paint.Style.STROKE;paint.strokeWidth=1.5f*s;paint.strokeCap=Paint.Cap.ROUND
+                    trace(canvas,effectPath,t)
+                    color(accent,(t*t*255).toInt());canvas.drawPath(effectPath,paint);canvas.restore()
                 }
                 "unlock","lock" -> {
-                    paint.style=Paint.Style.STROKE
-                    val ring=cameraRadius+dp(1.5f)
-                    if(ring+dp(1f)<min(cy,topHeight-cy)) {
-                        val t=(age/.55f).coerceIn(0f,1f)
-                        canvas.drawArc(cameraX-ring,cy-ring,cameraX+ring,cy+ring,-90f,360f*(1f-(1f-t)*(1f-t)),false,paint)
-                    }
-                    if(card.kind=="unlock"){
-                        val t=(age/.32f).coerceIn(0f,1f)
-                        val first=(t*2f).coerceIn(0f,1f)
-                        val second=(t*2f-1f).coerceIn(0f,1f)
-                        canvas.drawLine(iconX-dp(6f),cy,iconX-dp(6f)+dp(5f)*first,cy+dp(5f)*first,paint)
-                        if(second>0f)canvas.drawLine(iconX-dp(1f),cy+dp(5f),iconX-dp(1f)+dp(9f)*second,cy+dp(5f)-dp(10f)*second,paint)
-                    }
-                    else canvas.drawRoundRect(iconX-dp(6f),cy-dp(4f),iconX+dp(6f),cy+dp(6f),dp(2f),dp(2f),paint)
-                    paint.style=Paint.Style.FILL
-                }
-                "call" -> {
-                    color(GREEN); paint.style=Paint.Style.STROKE; paint.strokeWidth=dp(2.6f)
-                    path.reset();path.moveTo(iconX-dp(6f),cy-dp(7f));path.cubicTo(iconX-dp(7f),cy+dp(1f),iconX+dp(1f),cy+dp(8f),iconX+dp(7f),cy+dp(7f));canvas.drawPath(path,paint)
-                    paint.style=Paint.Style.FILL;canvas.drawRoundRect(iconX-dp(9f),cy-dp(9f),iconX-dp(3f),cy-dp(3f),dp(2f),dp(2f),paint);canvas.drawRoundRect(iconX+dp(3f),cy+dp(3f),iconX+dp(9f),cy+dp(9f),dp(2f),dp(2f),paint)
+                    cameraHalo(canvas,cy,age,card.kind=="unlock")
+                    unlockGlyph(canvas,iconX,cy,age,card.kind=="unlock")
                 }
                 "timer" -> {
                     paint.style=Paint.Style.STROKE;canvas.drawCircle(iconX,cy,dp(7f),paint);canvas.drawLine(iconX,cy,iconX,cy-dp(4f),paint);canvas.drawLine(iconX,cy,iconX+dp(3f),cy+dp(2f),paint);paint.style=Paint.Style.FILL
@@ -766,6 +870,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 "energy" -> card.detail.ifBlank { "Power" }
                 "music" -> if (NowPlayingBus.state.value?.isPlaying == true) "Playing" else "Paused"
                 "unlock" -> "Unlocked"
+                "lock" -> "Locked"
                 "connect" -> card.title
                 "timer" -> RunningTimerBus.state.value?.let { timer ->
                     val now=SystemClock.elapsedRealtime()
@@ -802,9 +907,16 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 }
                 text(canvas,detail,left,y+dp(42f),12f,Color.LTGRAY,w-left*2)
                 val progress=card.progress
-                if(progress!=null){color(Color.DKGRAY);canvas.drawRoundRect(left,y+dp(49f),w-left,y+dp(52f),dp(2f),dp(2f),paint);color(accent);canvas.drawRoundRect(left,y+dp(49f),left+(w-2*left)*progress.coerceIn(0f,1f),y+dp(52f),dp(2f),dp(2f),paint)}
+                if(progress!=null && card.kind!="energy"){color(Color.DKGRAY);canvas.drawRoundRect(left,y+dp(49f),w-left,y+dp(52f),dp(2f),dp(2f),paint);color(accent);canvas.drawRoundRect(left,y+dp(49f),left+(w-2*left)*progress.coerceIn(0f,1f),y+dp(52f),dp(2f),dp(2f),paint)}
                 val actions=if(card.kind=="call" && !keyguard.isKeyguardLocked) callButtons() else if(card.kind=="message" && enabled("message_text"))card.actions else emptyList()
-                if(card.kind=="hub") {
+                if(card.kind=="energy" && progress!=null){
+                    chargeDetail(canvas,w,y,age,progress)
+                } else if(card.kind=="unlock"){
+                    val t=if(enabled("reduce_motion",false))1f else NexoraPolicy.smoothstep((age-.25f)/.55f)
+                    color(GREEN,(t*255).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=dp(2f);paint.strokeCap=Paint.Cap.ROUND
+                    val cx=w-dp(40f);val yy=y+dp(61f);canvas.drawArc(cx-dp(14f),yy-dp(14f),cx+dp(14f),yy+dp(14f),-90f,360f*t,false,paint)
+                    effectPath.reset();effectPath.moveTo(cx-dp(6f),yy);effectPath.lineTo(cx-dp(1f),yy+dp(5f));effectPath.lineTo(cx+dp(7f),yy-dp(5f));trace(canvas,effectPath,t);paint.style=Paint.Style.FILL
+                } else if(card.kind=="hub") {
                     val l=dp(20f); val v=volumeFraction(); val barY=y+dp(48f)
                     color(0xFF303239.toInt());canvas.drawRoundRect(l,barY,w-l,barY+dp(4f),dp(2f),dp(2f),paint)
                     gradient(l,barY,w-2*l,dp(4f));canvas.drawRoundRect(l,barY,l+(w-2*l)*v,barY+dp(4f),dp(2f),dp(2f),paint)
@@ -829,12 +941,13 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 canvas.restore()
             }
             canvas.restore()
-            if(age<1.3f) postInvalidateOnAnimation()
+            if(age<1.3f && !enabled("reduce_motion",false)) postInvalidateOnAnimation()
             } finally { canvas.restore() }
             } finally { canvas.restore() }
         }
         override fun onTouchEvent(event: MotionEvent): Boolean {
             if(preview) return true
+            if(keyguard.isKeyguardLocked || !displayAwake())return false
             when(event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {downX=event.x;downY=event.y;downTime=SystemClock.uptimeMillis();draggingVolume=card.kind=="hub" && open && event.y-drawY in (topHeight+dp(29f))..(topHeight+dp(55f));if(draggingVolume)setVolume((event.x-drawX-dp(20f))/(visualWidth-dp(40f)));if(enabled("haptics"))performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);return true}
                 MotionEvent.ACTION_MOVE -> {if(draggingVolume)setVolume((event.x-drawX-dp(20f))/(visualWidth-dp(40f)));return true}
