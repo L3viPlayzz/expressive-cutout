@@ -303,8 +303,11 @@ class NexoraActivity : Activity() {
                 toggle("Reduced motion","Short transitions and static waveform","reduce_motion",false)
                 heading("MOTION LAB")
                 button("Notification Morph","Try a sample notification without sending one"){requestIsland("demo_message")}
-                button("Energy Flow","Preview the orbit, lightning and morphing battery meter at 84%"){requestIsland("demo_charge")}
+                button("Energy Flow","Preview normal charging"){requestIsland("demo_charge")}
+                button("Fast charging","Preview the faster emerald current"){requestIsland("demo_fast")}
+                button("Slow charging","Preview the softer charging pulse"){requestIsland("demo_slow")}
                 button("Connect Pulse","Preview a Wi-Fi connection"){preview(SystemEventType.WIFI_CONNECTED)}
+                button("Bluetooth Flow","Preview an accessory connection"){preview(SystemEventType.BLUETOOTH_CONNECTED)}
                 button("Wake Signature","Preview the locked-state capsule"){requestIsland("demo_lock")}
                 button("Unlock Signature","Preview the orbit, opening lock and traced green check"){requestIsland("demo_unlock")}
                 button("Sound Flow","Live music layout with sample artwork"){calibrating=true;calibrationMode=2;drawCalibration()}
@@ -444,6 +447,14 @@ class NexoraActivity : Activity() {
                 if(android.os.Build.VERSION.SDK_INT>=33)button("Test notifications",if(Permissions.isPostNotificationGranted(this))"Granted" else "Optional • allow NEXORA test notifications"){
                     requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),602)
                 }
+                heading("OPTIONAL CONNECTION DETAILS")
+                if(android.os.Build.VERSION.SDK_INT>=31)button("Bluetooth device names",if(checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT)==android.content.pm.PackageManager.PERMISSION_GRANTED)"Granted" else "Nearby devices permission • show connected accessory names"){
+                    requestPermissions(arrayOf(android.Manifest.permission.BLUETOOTH_CONNECT),603)
+                }
+                button("Wi-Fi network name",if(checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)==android.content.pm.PackageManager.PERMISSION_GRANTED)"Precise location granted • Android may still restrict background SSID access" else "Optional • Android requires location access to reveal the network name"){
+                    requestPermissions(arrayOf(android.Manifest.permission.ACCESS_COARSE_LOCATION,android.Manifest.permission.ACCESS_FINE_LOCATION),604)
+                }
+                add(label("Only connection labels are used. No location tracking or background location permission. Names are shown when Android makes them available.",13f,muted))
                 button("Refresh status","Recheck actual Android grants and Shizuku connection"){ShizukuState.refresh();drawPage()}
                 add(label("Shizuku must be running and authorized. Android or device restrictions may block individual grants; these remain available above.",13f,muted))
             }

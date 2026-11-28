@@ -7,6 +7,10 @@
          permission, so without it the Hotspot system event never fires. Normal permission,
          granted at install, read-only. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Needed only for the in-app "send test notification" button (Android 13+). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

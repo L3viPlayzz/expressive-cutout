@@ -4,6 +4,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NexoraPolicyTest {
+    @Test fun batterySpeedUsesMeasuredNetPower(){
+        assertEquals(12f,ChargeRate.watts(3_000_000,4000)!!,.001f)
+        assertNull(ChargeRate.watts(Int.MIN_VALUE,4000))
+        assertNull(ChargeRate.watts(0,4000))
+        assertEquals(ChargeRate.SLOW,ChargeRate.classify(listOf(2f,2.1f,2.2f),45))
+        assertEquals(ChargeRate.NORMAL,ChargeRate.classify(listOf(5f,6f,6f),45))
+        assertEquals(ChargeRate.FAST,ChargeRate.classify(listOf(11f,12f,12f),45))
+        assertEquals(ChargeRate.UNKNOWN,ChargeRate.classify(listOf(11f,12f,12f),95))
+        assertEquals(ChargeRate.UNKNOWN,ChargeRate.classify(listOf(2f,12f,15f),45))
+    }
     @Test fun nativeMotion(){
         assertEquals(0f,NexoraPolicy.pulse(0f,.1f,.9f),.0001f)
         assertEquals(1f,NexoraPolicy.pulse(.5f,.1f,.9f),.0001f)

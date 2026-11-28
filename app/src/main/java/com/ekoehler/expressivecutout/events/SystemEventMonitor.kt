@@ -316,12 +316,13 @@ class SystemEventMonitor(
         }
 
         override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
-            if (removedDevices.any { it.isHeadphone }) {
+            val removed=removedDevices.firstOrNull{it.isHeadphone}
+            if (removed!=null) {
                 emit(
                     SystemEventPayload(
                         type = SystemEventType.HEADPHONES_DISCONNECTED,
                         title = context.getString(R.string.event_headphones_disconnected),
-                        subtitle = "Audio routed to speaker",
+                        subtitle = removed.productName?.toString()?.takeIf{it.isNotBlank()} ?: "Audio routed to speaker",
                         actionIntentAction = Settings.ACTION_SOUND_SETTINGS,
                     ),
                 )
@@ -329,9 +330,11 @@ class SystemEventMonitor(
         }
     }
 
+    @Volatile private var lastWifiName:String?=null
     private val wifiCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             val ssid = getWifiSsid(context)
+            lastWifiName=ssid
             val subtitle = ssid ?: "Connected"
             emit(
                 SystemEventPayload(
@@ -348,7 +351,7 @@ class SystemEventMonitor(
                 SystemEventPayload(
                     type = SystemEventType.WIFI_DISCONNECTED,
                     title = context.getString(R.string.event_wifi_disconnected),
-                    subtitle = "Disconnected",
+                    subtitle = lastWifiName ?: "Disconnected",
                     actionIntentAction = Settings.ACTION_WIFI_SETTINGS,
                 ),
             )

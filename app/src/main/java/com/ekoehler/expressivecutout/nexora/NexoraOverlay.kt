@@ -180,6 +180,55 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private var batteryLevel = -1
     private val progressKeys=mutableSetOf<String>()
     private var plugged = false
+    private var batteryStatus=-1
+    private var batteryVoltage=-1
+    private var plugType=0
+    private var chargeRate=ChargeRate.UNKNOWN
+    private var chargeJob:Job?=null
+    private var chargeSession=0
+    private val batteryManager=service.getSystemService(android.os.BatteryManager::class.java)
+    private fun updateChargeRate(){
+        chargeJob?.cancel()
+        if(!plugged || batteryStatus!=android.os.BatteryManager.BATTERY_STATUS_CHARGING || batteryLevel !in 0..79){chargeRate=ChargeRate.UNKNOWN;return}
+        val session=chargeSession
+        chargeJob=scope.launch{
+            val samples=mutableListOf<Float>()
+            repeat(3){n->
+                if(n>0)delay(650)
+                if(!plugged || chargeSession!=session || !displayAwake())return@launch
+                val voltage=batteryVoltage
+                val sample=withContext(Dispatchers.IO){
+                    val manager=batteryManager
+                    if(manager==null)null else runCatching{
+                        val avg=manager.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE)
+                        val current=if(avg==Int.MIN_VALUE || avg==0)manager.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)else avg
+                        ChargeRate.watts(current,voltage)
+                    }.getOrNull()
+                }
+                sample?.let{samples.add(it)}
+            }
+            if(plugged && chargeSession==session){chargeRate=ChargeRate.classify(samples,batteryLevel);scheduleRender()}
+        }
+    }
+    private fun chargingCard(base:Card):Card {
+        if(base.eventType!="CHARGING_STARTED" || !plugged)return base
+        val pct=batteryLevel.takeIf{it>=0} ?: base.progress?.let{(it*100).roundToInt()}
+        val source=when(plugType){
+            android.os.BatteryManager.BATTERY_PLUGGED_WIRELESS->"Wireless"
+            android.os.BatteryManager.BATTERY_PLUGGED_USB->"USB"
+            else->"Power connected"
+        }
+        val full=batteryStatus==android.os.BatteryManager.BATTERY_STATUS_FULL
+        val paused=batteryStatus==android.os.BatteryManager.BATTERY_STATUS_NOT_CHARGING
+        val rate=if(batteryStatus==android.os.BatteryManager.BATTERY_STATUS_CHARGING && batteryLevel in 0..79)chargeRate else ChargeRate.UNKNOWN
+        val title=when{full->"Fully charged";paused->"Charging paused";else->rate.title}
+        val subtitle=buildString{
+            if(pct!=null)append("$pct% • ")
+            append(source)
+            if(rate==ChargeRate.FAST || rate==ChargeRate.SLOW)append(" • Estimated")
+        }
+        return base.copy(title=title,detail=subtitle,progress=pct?.div(100f),chargeRate=rate,badge=pct?.let{"$it%"})
+    }
     private fun enabled(key:String, fallback:Boolean=true)=prefs.getBoolean(key,fallback)
     private fun expandedMs()=NexoraPolicy.expandedMillis(3)
     private fun compactMs()=NexoraPolicy.compactMillis(3)
@@ -188,7 +237,12 @@ class NexoraOverlay(private val service: AccessibilityService) {
         val level=intent.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL,-1)
         val scale=intent.getIntExtra(android.os.BatteryManager.EXTRA_SCALE,100)
         batteryLevel=if(level>=0 && scale>0)(level*100/scale).coerceIn(0,100) else -1
-        plugged=intent.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED,0)!=0
+        val oldPlug=plugType;val oldStatus=batteryStatus
+        plugType=intent.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED,0)
+        plugged=plugType!=0
+        batteryVoltage=intent.getIntExtra(android.os.BatteryManager.EXTRA_VOLTAGE,-1)
+        batteryStatus=intent.getIntExtra(android.os.BatteryManager.EXTRA_STATUS,-1)
+        if(oldPlug!=plugType || oldStatus!=batteryStatus){chargeSession++;chargeRate=ChargeRate.UNKNOWN;chargeJob?.cancel();if(plugged && displayAwake())updateChargeRate()}
     }
     private var flashUntil = 0L
     private var autoCollapseAt = 0L
@@ -263,13 +317,14 @@ class NexoraOverlay(private val service: AccessibilityService) {
             if (intent?.action == android.content.Intent.ACTION_SCREEN_OFF) {
                 handler.removeCallbacks(refresh)
                 displayVisible=false
+                chargeJob?.cancel()
                 pending.clear();  hadLockedScreen=keyguard.isDeviceLocked || keyguard.isKeyguardLocked
                 flash = null; expanded = false; browsing = false; current = null; autoCollapseAt = 0L; autoFocus = null
                 inboxOpen=false;cancelNotchGesture();removeNotch();remove()
             } else {
                 when(intent?.action){
                     android.content.Intent.ACTION_BATTERY_CHANGED -> refreshBattery(intent)
-                    android.content.Intent.ACTION_SCREEN_ON -> if(keyguard.isDeviceLocked)hadLockedScreen=true else if(hadLockedScreen)confirmedUnlock()
+                    android.content.Intent.ACTION_SCREEN_ON -> {if(plugged)updateChargeRate();if(keyguard.isDeviceLocked)hadLockedScreen=true else if(hadLockedScreen)confirmedUnlock()}
                     android.content.Intent.ACTION_USER_PRESENT -> if(hadLockedScreen)confirmedUnlock()
                 }
                 render()
@@ -277,7 +332,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         }
     }
     private data class Card(val kind: String, val title: String, val detail: String = "", val accent: Int = BLUE,
-        val intent: PendingIntent? = null, val key: String? = null, val progress: Float? = null, val appIcon: android.graphics.drawable.Drawable? = null, val actions: List<CutoutSignal.Notification.Action> = emptyList(), val settingsAction:String?=null, val packageName:String?=null, val eventType:String?=null)
+        val intent: PendingIntent? = null, val key: String? = null, val progress: Float? = null, val appIcon: android.graphics.drawable.Drawable? = null, val actions: List<CutoutSignal.Notification.Action> = emptyList(), val settingsAction:String?=null, val packageName:String?=null, val eventType:String?=null, val chargeRate:ChargeRate=ChargeRate.UNKNOWN, val badge:String?=null)
     companion object {
         private val BLUE = Color.rgb(99, 202, 255)
         private val VIOLET = Color.rgb(181, 151, 255)
@@ -339,11 +394,14 @@ class NexoraOverlay(private val service: AccessibilityService) {
                         else -> BLUE
                     }
                     val charging=t=="CHARGING_STARTED" || t=="CHARGING_COMPLETE"
+                    if(t=="CHARGING_STARTED" && plugged)updateChargeRate()
                     val pct=signal.payload.collapsedBadgeText?.trim()?.removeSuffix("%")?.toIntOrNull()?.coerceIn(0,100)
                         ?: batteryLevel.takeIf{it>=0}
+                    val detail=signal.payload.subtitle.orEmpty()
+                    val badge=if(kind=="energy")pct?.let{"$it%"} else if(kind=="connect")detail.takeIf{it.isNotBlank()} ?: signal.payload.collapsedBadgeText else signal.payload.collapsedBadgeText
                     show(Card(kind, signal.payload.title ?: service.getString(signal.type.labelRes),
-                        if(charging && pct!=null)"$pct%" else signal.payload.collapsedBadgeText ?: signal.payload.subtitle.orEmpty(), accent,
-                        progress=if(charging)pct?.div(100f) else null, settingsAction=signal.payload.actionIntentAction,eventType=t))
+                        detail.ifBlank{badge.orEmpty()}, accent,
+                        progress=if(charging)pct?.div(100f) else null, settingsAction=signal.payload.actionIntentAction,eventType=t,badge=badge))
                 }
                 is CutoutSignal.SystemEnded -> Unit
                 is CutoutSignal.Music -> {
@@ -363,7 +421,10 @@ class NexoraOverlay(private val service: AccessibilityService) {
         scope.launch { NexoraCalibration.requests.collect { request ->
             if(!ringing() && !keyguard.isKeyguardLocked && enabled("enabled")) {
                 if(request=="demo_unlock"){show(Card("unlock","Unlocked","Animation preview",GREEN));return@collect}
-                if(request=="demo_charge"){show(Card("energy","Charging","84%",GREEN,progress=.84f));return@collect}
+                if(request in listOf("demo_charge","demo_fast","demo_slow")){
+                    val rate=when(request){"demo_fast"->ChargeRate.FAST;"demo_slow"->ChargeRate.SLOW;else->ChargeRate.NORMAL}
+                    show(Card("energy",rate.title,"84% • Preview",GREEN,progress=.84f,chargeRate=rate,badge="84%"));return@collect
+                }
                 if(request=="demo_lock"){show(Card("lock","Locked","Animation preview",VIOLET));return@collect}
                 if(request=="demo_message") {
                     show(Card("message","NEXORA preview","Your notification animation",BLUE,appIcon=appIcon(service.packageName)))
@@ -459,7 +520,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         while(pending.isNotEmpty() && now-pending.peekFirst()!!.first>30000L)pending.removeFirst()
         if(!locked && !ringing() && !browsing && !inboxOpen && flash==null && pending.isNotEmpty()) activate(pending.removeFirst().second,now)
         flash?.takeIf { !locked || (it.kind != "message" && it.kind != "progress") }?.let {
-            if(it.kind in setOf("message","progress") && !enabled("message_text")) result.add(it.copy(title=it.packageName?.let{pkg->runCatching{service.packageManager.getApplicationLabel(service.packageManager.getApplicationInfo(pkg,0)).toString()}.getOrNull()} ?: "Notification",detail="",actions=emptyList())) else result.add(it)
+            if(it.kind in setOf("message","progress") && !enabled("message_text")) result.add(it.copy(title=it.packageName?.let{pkg->runCatching{service.packageManager.getApplicationLabel(service.packageManager.getApplicationInfo(pkg,0)).toString()}.getOrNull()} ?: "Notification",detail="",actions=emptyList())) else result.add(chargingCard(it))
         }
         if (locked) {
             if(enabled("lock_wake") && enabled("events") && enabled("event_unlock") && keyguard.isDeviceLocked && result.none{it.kind=="lock" || it.kind=="unlock"} && !ringing())result.add(Card("lock","Locked","Unlock your device",VIOLET))
@@ -476,7 +537,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         if(!focused() && enabled("notifications") && enabled("live_progress")) NotificationInboxBus.items.value.filter{it.packageName !in mutedApps && (it.progress!=null || it.progressIndeterminate) && it.key!=flash?.key}.take(5).forEach{
             result.add(Card("progress",if(enabled("message_text"))it.title.ifBlank{it.appName}else it.appName,it.appName,BLUE,key=it.key,progress=it.progress,appIcon=appIcon(it.packageName)))
         }
-        if(!focused() && enabled("charge_live",false) && enabled("events") && enabled("event_energy") && plugged && batteryLevel>=0 && flash?.kind!="energy") result.add(Card("energy","Charging","$batteryLevel%",GREEN,progress=batteryLevel/100f))
+        if(!focused() && enabled("charge_live",false) && enabled("events") && enabled("event_energy") && plugged && batteryLevel>=0 && flash?.kind!="energy") result.add(chargingCard(Card("energy","Charging","$batteryLevel%",GREEN,progress=batteryLevel/100f,eventType="CHARGING_STARTED",badge="$batteryLevel%")))
         if (!focused() && prefs.getBoolean("music", true)) NowPlayingBus.state.value?.takeIf { it.packageName !in mutedApps && !hidePlayer(it.packageName) && (it.isPlaying || (expanded && current?.kind == "music")) }?.let {
             result.add(Card("music", it.title ?: "Now playing", it.artist.orEmpty(), VIOLET, mediaIntent))
         }
@@ -991,8 +1052,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     color(tone,230);paint.style=Paint.Style.STROKE;paint.strokeWidth=2.4f
                     canvas.drawArc(-21f,-21f,21f,21f,-90f,360f*amount,false,paint)
                     if(!reduced && card.accent==GREEN && age<1.15f){
-                        val q=NexoraPolicy.phase(age,.03f,.98f)
-                        val pulse=NexoraPolicy.pulse(age,.02f,1.15f)
+                        val end=when(card.chargeRate){ChargeRate.FAST->.80f;ChargeRate.SLOW->1.12f;else->.98f}
+                        val q=NexoraPolicy.phase(age,.03f,end)
+                        val pulse=NexoraPolicy.pulse(age,.02f,end+.03f)
                         val radius=10f+10f*q
                         color(GREEN,(90*pulse).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.5f
                         canvas.drawCircle(0f,0f,radius,paint)
@@ -1043,8 +1105,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
             }
             // A small current moves through the free space below the camera.
             if(isEnergy && !reduced && card.accent==GREEN && age<1.12f && w>dp(100f)){
-                val q=NexoraPolicy.phase(age,.12f,1.03f)
-                val intensity=NexoraPolicy.pulse(age,.10f,1.12f)
+                val end=when(card.chargeRate){ChargeRate.FAST->.80f;ChargeRate.SLOW->1.12f;else->1.03f}
+                val q=NexoraPolicy.phase(age,.12f,end)
+                val intensity=NexoraPolicy.pulse(age,.10f,end+.06f)
                 val l=dp(12f);val r=w-dp(12f)
                 val yy=NexoraPolicy.lerp(topHeight-dp(3.2f),topHeight+dp(63f),t)
                 if(yy<h-dp(3f) && r>l){
@@ -1063,11 +1126,14 @@ class NexoraOverlay(private val service: AccessibilityService) {
             val labelFade=(1f-NexoraPolicy.phase(e,.12f,.58f))*visibility
             val right=cameraX+cameraRadius+dp(5f)
             val rightWidth=(w-right-dp(7f)).coerceAtLeast(0f)
-            val compactLabel=if(isEnergy)card.detail.ifBlank{"Power"} else if(unlocked)"Unlocked" else "Locked"
+            val compactLabel=if(isEnergy)card.badge ?: card.progress?.let{"${(it*100).roundToInt()}%"} ?: "Power" else if(unlocked)"Unlocked" else "Locked"
             if(labelFade>0f && rightWidth>0f){
                 if(labelFade<.999f)canvas.saveLayerAlpha(0f,0f,w,h,(labelFade*255).toInt()) else canvas.save()
                 val textSize=min(if(isEnergy)14f else 10.5f,(topHeight/density-6f).coerceAtLeast(8f))
-                text(canvas,compactLabel,right,cameraY+dp(textSize*.35f),textSize,tone,rightWidth,true)
+                val speed=if(isEnergy)card.chargeRate.badge else ""
+                val twoLines=speed.isNotBlank() && topHeight>=dp(26f)
+                text(canvas,compactLabel,right,cameraY+dp(if(twoLines)1f else textSize*.35f),if(twoLines)12f else textSize,tone,rightWidth,true)
+                if(twoLines)text(canvas,speed,right,cameraY+dp(10f),8f,tone,rightWidth)
                 canvas.restore()
             }
             val detailAlpha=NexoraPolicy.phase(e,.25f,.85f)
@@ -1316,7 +1382,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 "music" -> if (NowPlayingBus.state.value?.isPlaying == true) "Playing" else "Paused"
                 "unlock" -> "Unlocked"
                 "lock" -> "Locked"
-                "connect" -> card.title
+                "connect" -> card.badge ?: card.title
                 "timer" -> RunningTimerBus.state.value?.let { timer ->
                     val now=SystemClock.elapsedRealtime()
                     val ms=timer.pausedRemainingMs ?: timer.endElapsedRealtimeMs?.let{if(timer.countsUp)now-it else it-now} ?: 0L
