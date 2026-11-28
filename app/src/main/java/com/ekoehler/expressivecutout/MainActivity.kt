@@ -2,6 +2,8 @@ package com.ekoehler.expressivecutout
 
 import android.content.Context
 import android.os.Bundle
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -49,7 +51,13 @@ class MainActivity : ComponentActivity() {
             }
 
             ExpressiveCutoutTheme(appTheme = theme) {
-                MainScreen(viewModel)
+                androidx.compose.foundation.layout.Box {
+                    MainScreen(viewModel)
+                    androidx.compose.material3.FloatingActionButton(
+                        onClick = { startActivity(android.content.Intent(this@MainActivity, DevDashboardActivity::class.java)) },
+                        modifier = androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.BottomEnd).padding(end = 16.dp, bottom = 100.dp)
+                    ) { androidx.compose.material3.Text("DEV") }
+                }
             }
         }
     }
