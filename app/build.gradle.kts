@@ -46,6 +46,7 @@ android {
         create("consumer") {
             dimension = "edition"
             buildConfigField("boolean", "NEXORA_DEV", "false")
+            manifestPlaceholders["nexoraTestReceivers"] = "false"
             manifestPlaceholders["nexoraLabel"] = "NEXORA"
             manifestPlaceholders["nexoraOverlayLabel"] = "NEXORA overlay"
             manifestPlaceholders["nexoraNotificationLabel"] = "NEXORA notifications"
@@ -55,6 +56,7 @@ android {
             applicationIdSuffix = ".dev"
             versionNameSuffix = "-dev"
             buildConfigField("boolean", "NEXORA_DEV", "true")
+            manifestPlaceholders["nexoraTestReceivers"] = "true"
             manifestPlaceholders["nexoraLabel"] = "NEXORA Dev"
             manifestPlaceholders["nexoraOverlayLabel"] = "NEXORA Dev overlay"
             manifestPlaceholders["nexoraNotificationLabel"] = "NEXORA Dev notifications"

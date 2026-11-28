@@ -232,7 +232,7 @@ class NexoraActivity : Activity() {
             Permissions.openShizuku(this);return
         }
         android.app.AlertDialog.Builder(this).setTitle("Grant NEXORA permissions?")
-            .setMessage("Allow Shizuku to enable NEXORA accessibility, notification access, battery exemption, phone state and optional test notifications. Other apps and accessibility services will be kept. You can revoke grants in Android settings.")
+            .setMessage("Allow Shizuku to enable NEXORA accessibility, notification access, battery exemption and phone state"+(if(isDev)" and optional test notifications" else "")+". Other apps and accessibility services will be kept. You can revoke grants in Android settings.")
             .setNegativeButton("Cancel",null)
             .setPositiveButton("Grant all"){_,_->
                 if(ShizukuState.status.value==ShizukuStatus.READY)grantAll()
@@ -289,7 +289,7 @@ class NexoraActivity : Activity() {
                     setOnClickListener{go("access")}
                 }
                 add(status,20)
-                toggle("NEXORA Island","Master switch","enabled")
+                toggle("NEXORA Island","Master switch","enabled",!isDev)
                 toggle("Focus mode","Pause non-call activities without dismissing Android notifications","focus_mode",false)
                 heading("PERSONALIZE")
                 button("Appearance","Size, position and live preview"){go("appearance")}
@@ -484,7 +484,7 @@ class NexoraActivity : Activity() {
                     else if(ShizukuState.status.value!=ShizukuStatus.READY)Permissions.openShizuku(this)
                     else Toast.makeText(this,"Shizuku connected",Toast.LENGTH_SHORT).show()
                 }
-                button(if(granting)"Applying permissions…" else "Grant all with Shizuku",if(granting)"Checking Android permissions" else "Accessibility, notifications, battery exemption, phone state and test alerts"){
+                button(if(granting)"Applying permissions…" else "Grant all with Shizuku",if(granting)"Checking Android permissions" else "Accessibility, notifications, battery exemption, phone state"+(if(isDev)" and test alerts" else "")){
                     if(!granting)confirmGrantAll()
                 }
                 grantSummary?.let{add(label(it,14f,muted),12)}
@@ -547,7 +547,7 @@ class NexoraActivity : Activity() {
                 add(label("Independent Canvas interface, powered by Android media sessions, notification access and accessibility. No network permission.",15f,muted))
                 add(label("GPL-3.0 • Modified from EvanKoe/expressive-cutout. No warranty. Source: github.com/L3viPlayzz/expressive-cutout/tree/nexora-momentum",13f,muted))
                 button("Reset NEXORA preferences","Restore renderer settings; permissions are not removed"){
-                    android.app.AlertDialog.Builder(this).setTitle("Reset NEXORA?").setMessage("This restores the new renderer settings.").setNegativeButton("Cancel",null).setPositiveButton("Reset"){_,_->prefs.edit().clear().apply();go("home")}.show()
+                    android.app.AlertDialog.Builder(this).setTitle("Reset NEXORA?").setMessage("This restores the new renderer settings.").setNegativeButton("Cancel",null).setPositiveButton("Reset"){_,_->prefs.edit().clear().putBoolean("enabled",!isDev).apply();go("home")}.show()
                 }
             }
         }

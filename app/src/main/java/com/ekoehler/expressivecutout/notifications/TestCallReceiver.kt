@@ -13,6 +13,7 @@ class TestCallReceiver : BroadcastReceiver() {
 
     /** Routes the test call notification's buttons back to [TestCaller]. */
     override fun onReceive(context: Context, intent: Intent) {
+        if(!com.ekoehler.expressivecutout.BuildConfig.NEXORA_DEV || com.ekoehler.expressivecutout.core.OnCallBus.state.value?.packageName!=context.packageName)return
         when (intent.action) {
             ACTION_END -> TestCaller.end()
             ACTION_ANSWER -> TestCaller.answer(context)

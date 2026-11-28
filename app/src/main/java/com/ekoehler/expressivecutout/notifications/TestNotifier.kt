@@ -75,6 +75,7 @@ object TestNotifier {
     // Guarded by canPost() below; the lint check can't see through the runtime helper.
     @SuppressLint("MissingPermission")
     fun send(context: Context) {
+        if(!com.ekoehler.expressivecutout.BuildConfig.NEXORA_DEV)return
         ensureChannel(context)
 
         val replyIntent = broadcast(context, requestCode = 1, TestReplyReceiver.ACTION_REPLY)
@@ -153,6 +154,7 @@ object TestNotifier {
      */
     @SuppressLint("MissingPermission")
     fun sendMultiline(context: Context) {
+        if(!com.ekoehler.expressivecutout.BuildConfig.NEXORA_DEV)return
         ensureChannel(context)
 
         val replyIntent = broadcast(context, requestCode = 3, TestReplyReceiver.ACTION_REPLY)
@@ -243,6 +245,7 @@ object TestNotifier {
      */
     @SuppressLint("MissingPermission")
     fun sendPlain(context: Context) {
+        if(!com.ekoehler.expressivecutout.BuildConfig.NEXORA_DEV)return
         ensureChannel(context)
 
         val title = context.getString(R.string.test_plain_notification_title)
@@ -284,6 +287,7 @@ object TestNotifier {
      * satellite bubble rather than disappearing. Re-tapping restarts the pair.
      */
     fun sendPair(context: Context) {
+        if(!com.ekoehler.expressivecutout.BuildConfig.NEXORA_DEV)return
         val appContext = context.applicationContext
         pairJob?.cancel()
         pairJob = scope.launch {
@@ -344,6 +348,7 @@ object TestNotifier {
      */
     @SuppressLint("MissingPermission")
     fun sendProgress(context: Context) {
+        if(!com.ekoehler.expressivecutout.BuildConfig.NEXORA_DEV)return
         ensureChannel(context)
         val appContext = context.applicationContext
         val title = appContext.getString(R.string.test_progress_notification_title)
@@ -438,6 +443,7 @@ object TestNotifier {
      * Emits a rich system event payload for test previews.
      */
     fun sendSystemEvent(payload: SystemEventPayload) {
+        if(!com.ekoehler.expressivecutout.BuildConfig.NEXORA_DEV)return
         IslandEventBus.emit(CutoutSignal.System(payload))
     }
 

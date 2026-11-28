@@ -92,11 +92,13 @@
         <!-- Handles the buttons on the in-app test notification (reply / mark as read). -->
         <receiver
             android:name=".notifications.TestReplyReceiver"
+            android:enabled="${nexoraTestReceivers}"
             android:exported="false" />
 
         <!-- Ends the in-app test call when its hang-up button is tapped. -->
         <receiver
             android:name=".notifications.TestCallReceiver"
+            android:enabled="${nexoraTestReceivers}"
             android:exported="false" />
 
         <!-- Captures posted notifications and forwards them to the island. -->
