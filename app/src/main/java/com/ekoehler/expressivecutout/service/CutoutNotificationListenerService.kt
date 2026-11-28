@@ -1110,20 +1110,26 @@ class CutoutNotificationListenerService : NotificationListenerService() {
         }
 
         /** Opens a notification explicitly selected in the inbox without reading its message body. */
-        fun openFromInbox(key: String) {
-            val listener = instance ?: return
+        fun openFromInbox(key: String): Boolean {
+            val listener = instance ?: return false
             val item = runCatching { listener.getActiveNotifications(arrayOf(key)).firstOrNull() }
                 .onFailure { Log.w(TAG, "Cannot find inbox notification", it) }
-                .getOrNull() ?: return
-            val intent = item.notification.contentIntent ?: return
-            runCatching { intent.send() }
+                .getOrNull() ?: return false
+            val intent = item.notification.contentIntent
+            if(intent!=null && runCatching { intent.send() }
                 .onSuccess {
                     if (item.notification.flags and Notification.FLAG_AUTO_CANCEL != 0) {
                         runCatching { listener.cancelNotification(key) }
                             .onFailure { Log.w(TAG, "Cannot auto-clear opened notification", it) }
                     }
                 }
-                .onFailure { Log.w(TAG, "Cannot open inbox notification", it) }
+                .onFailure { Log.w(TAG, "Cannot open inbox notification", it) }.isSuccess)return true
+            // Explicit user tap: fall back to the originating app launcher if no deep link works.
+            return runCatching {
+                val launch=listener.packageManager.getLaunchIntentForPackage(item.packageName) ?: return false
+                listener.startActivity(launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                true
+            }.getOrDefault(false)
         }
 
         /**

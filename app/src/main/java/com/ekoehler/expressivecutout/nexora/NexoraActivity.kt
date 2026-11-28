@@ -407,7 +407,7 @@ class NexoraActivity : Activity() {
                 toggle("Message previews","Show message content while the phone is unlocked","message_text")
                 toggle("Smart queue","Optional • let new events wait rather than interrupt each other","queue_events",false)
                 toggle("Live progress","Downloads and uploads stay visible while Android reports progress","live_progress")
-                toggle("Notification inbox","View active notifications in a paged island list","inbox")
+                toggle("Notification inbox","Scroll through active notifications in the island","inbox")
                 button("Camera inbox","Single tap to view notifications"){go("notch")}
                 button("Open inbox","Browse active notifications on the real island"){requestIsland("inbox")}
                 button("Notification list","View and open active notifications in NEXORA"){go("inbox")}
@@ -476,7 +476,7 @@ class NexoraActivity : Activity() {
                 toggle("Swipe up","Dismiss the temporary island view","swipe_close")
                 toggle("Swipe down","Open Android notifications from the compact island","swipe_shade")
                 heading("TOUCH")
-                add(label("Tap the camera opening for the notification inbox. Swipe between pages; tap a message to open it. Tap outside the camera area to expand a live activity. Incoming calls override navigation gestures until answered or declined.",14f,muted))
+                add(label("Tap the camera opening for the notification inbox. Scroll vertically; tap a notification to open its app. Tap outside the camera area to expand a live activity. Incoming calls override navigation gestures until answered or declined.",14f,muted))
             }
             "access"->{
                 pageFrame("Setup & Shizuku","Grant the permissions needed for NEXORA.")
