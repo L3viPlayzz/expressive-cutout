@@ -37,7 +37,7 @@
         android:allowBackup="true"
         android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
+        android:label="NEXORA DEV"
         android:localeConfig="@xml/locales_config"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
@@ -46,7 +46,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="@string/app_name"
+            android:label="NEXORA DEV"
             android:theme="@style/Theme.ExpressiveCutout">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -54,6 +54,8 @@
             </intent-filter>
         </activity>
 
+        <activity android:name=".DevDashboardActivity" android:exported="false" android:label="NEXORA DEV Dashboard" />
+        
         <!-- Shizuku's own initialisation hook: it binds this provider to hand our process the
              privileged binder. Required by the Shizuku API, not something we call ourselves. -->
         <provider
