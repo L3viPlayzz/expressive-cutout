@@ -24,8 +24,8 @@ android {
         applicationId = "com.nexora.island"
         minSdk = 29
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.3.0-rc1"
+        versionCode = 12
+        versionName = "1.3.0-rc2"
     }
 
 	signingConfigs {
@@ -40,6 +40,26 @@ android {
 			}
 		}
 	}
+
+    flavorDimensions += "edition"
+    productFlavors {
+        create("consumer") {
+            dimension = "edition"
+            buildConfigField("boolean", "NEXORA_DEV", "false")
+            manifestPlaceholders["nexoraLabel"] = "NEXORA"
+            manifestPlaceholders["nexoraOverlayLabel"] = "NEXORA overlay"
+            manifestPlaceholders["nexoraNotificationLabel"] = "NEXORA notifications"
+        }
+        create("developer") {
+            dimension = "edition"
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+            buildConfigField("boolean", "NEXORA_DEV", "true")
+            manifestPlaceholders["nexoraLabel"] = "NEXORA Dev"
+            manifestPlaceholders["nexoraOverlayLabel"] = "NEXORA Dev overlay"
+            manifestPlaceholders["nexoraNotificationLabel"] = "NEXORA Dev notifications"
+        }
+    }
 
     buildTypes {
 		getByName("release") {

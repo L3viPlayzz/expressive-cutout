@@ -1,6 +1,9 @@
 package com.ekoehler.expressivecutout.nexora
 
 import android.app.Activity
+import com.ekoehler.expressivecutout.BuildConfig
+import com.ekoehler.expressivecutout.notifications.TestCaller
+import com.ekoehler.expressivecutout.notifications.TestNotifier
 import android.content.Intent
 import android.content.Context
 import android.graphics.Color
@@ -41,6 +44,8 @@ class NexoraActivity : Activity() {
     private var grantSummary:String?=null
     private var statusJob:kotlinx.coroutines.Job?=null
     private var pageEpoch=0
+    private var sequenceJob:kotlinx.coroutines.Job?=null
+    private val isDev=BuildConfig.NEXORA_DEV
     private val mainScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob()+kotlinx.coroutines.Dispatchers.Main.immediate)
     private fun dp(v:Int) = (v*resources.displayMetrics.density).toInt()
     private fun surface(c:Int,r:Int=22)=GradientDrawable().apply{setColor(c);cornerRadius=dp(r).toFloat()}
@@ -48,6 +53,8 @@ class NexoraActivity : Activity() {
         super.onCreate(savedInstanceState)
         window.statusBarColor=Color.BLACK;window.navigationBarColor=Color.BLACK;window.decorView.systemUiVisibility=0
         page=savedInstanceState?.getString("page") ?: "home"
+        if(!isDev && page=="lab")page="home"
+        if(isDev && !prefs.contains("enabled"))prefs.edit().putBoolean("enabled",false).apply()
         calibrating=savedInstanceState?.getBoolean("calibrating") ?: false
         calibrationMode=savedInstanceState?.getInt("calibrationMode",1) ?: 1
         if(calibrating)drawCalibration() else drawPage()
@@ -69,6 +76,7 @@ class NexoraActivity : Activity() {
     }
     override fun onPause(){
         NexoraCalibration.mode.value=0
+        sequenceJob?.cancel()
         super.onPause()
     }
     override fun onDestroy(){
@@ -80,6 +88,7 @@ class NexoraActivity : Activity() {
     }
     @Deprecated("Use system back navigation")
     override fun onBackPressed(){
+        sequenceJob?.cancel()
         if(calibrating) exitCalibration() else if(page!="home"){page="home";drawPage()} else super.onBackPressed()
     }
     private fun label(value:String,size:Float=14f,color:Int=white,bold:Boolean=false)=TextView(this).apply{
@@ -175,7 +184,7 @@ class NexoraActivity : Activity() {
         }
         button("Done","Close preview and return to invisible standby when idle"){exitCalibration()}
     }
-    private fun go(target:String){page=target;drawPage()}
+    private fun go(target:String){sequenceJob?.cancel();page=if(target=="lab" && !isDev)"home" else target;drawPage()}
     private fun pageFrame(title:String,subtitle:String){
         pageEpoch++
         val scroll=ScrollView(this).apply{setBackgroundColor(Color.BLACK);isFillViewport=true;clipToPadding=false}
@@ -188,7 +197,18 @@ class NexoraActivity : Activity() {
         add(label(title,30f,white,true),5)
         add(label(subtitle,14f,muted),22)
     }
+    private fun postTest(action:()->Unit){
+        if(!isDev)return
+        if(TestNotifier.canPost(this))action() else if(android.os.Build.VERSION.SDK_INT>=33){requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),602);Toast.makeText(this,"Grant permission and tap the test again",Toast.LENGTH_SHORT).show()}
+    }
+    private fun testCall(kind:TestCaller.Kind){
+        if(!isDev || !CutoutAccessibilityService.bound.value || !prefs.getBoolean("enabled",false))return
+        val call=OnCallBus.state.value
+        if(call!=null && call.packageName!=packageName){Toast.makeText(this,"A real call is active",Toast.LENGTH_SHORT).show();return}
+        TestCaller.toggle(this,kind)
+    }
     private fun requestIsland(kind:String){
+        if(kind.startsWith("demo_") && !isDev)return
         if(!CutoutAccessibilityService.bound.value){Toast.makeText(this,"Enable accessibility first",Toast.LENGTH_LONG).show();return}
         NexoraCalibration.requests.tryEmit(kind)
     }
@@ -231,9 +251,9 @@ class NexoraActivity : Activity() {
                 if(!Permissions.isNotificationAccessGranted(this@NexoraActivity))add("Notification access")
                 if(!Permissions.isBatteryOptimizationIgnored(this@NexoraActivity))add("Battery exemption")
                 if(!Permissions.isPhoneStateGranted(this@NexoraActivity))add("Phone state")
-                if(!Permissions.isPostNotificationGranted(this@NexoraActivity))add("Test notifications")
+                if(isDev && !Permissions.isPostNotificationGranted(this@NexoraActivity))add("Test notifications")
             }
-            grantSummary=if(missing.isEmpty())"All five permissions verified." else "Still missing: "+missing.joinToString(", ")+". Use the individual settings below."
+            grantSummary=if(missing.isEmpty())"All requested permissions verified." else "Still missing: "+missing.joinToString(", ")+". Use the individual settings below."
             if(!commandsOk && missing.isEmpty())grantSummary="All requested permissions verified."
             granting=false
             if(page=="access" && !isFinishing && !isDestroyed)drawPage()
@@ -257,7 +277,7 @@ class NexoraActivity : Activity() {
     private fun drawPage(){
         when(page){
             "home" -> {
-                pageFrame("NEXORA","BEYOND THE ISLAND")
+                pageFrame(if(isDev)"NEXORA DEV" else "NEXORA",if(isDev)"BEYOND THE ISLAND • DEVELOPER EDITION" else "BEYOND THE ISLAND")
                 val status=LinearLayout(this).apply{
                     orientation=LinearLayout.VERTICAL
                     background=GradientDrawable(GradientDrawable.Orientation.TL_BR,intArrayOf(0xFF152438.toInt(),0xFF201A35.toInt())).apply{cornerRadius=dp(25).toFloat()}
@@ -273,11 +293,12 @@ class NexoraActivity : Activity() {
                 toggle("Focus mode","Pause non-call activities without dismissing Android notifications","focus_mode",false)
                 heading("PERSONALIZE")
                 button("Appearance","Size, position and live preview"){go("appearance")}
-                button("Motion","Motion Lab and accessibility"){go("motion")}
+                button("Motion","Animation accessibility and haptics"){go("motion")}
                 button("Live activities","Music, timers, charging and connections"){go("activities")}
                 button("Notifications","Privacy, queue and inbox"){go("notifications")}
                 button("Notch Touch","Camera gestures and sensitivity"){go("notch")}
                 button("Gestures","Island touch preferences"){go("gestures")}
+                if(isDev){heading("DEVELOPER");button("Motion Lab","Simulated events, real test notifications and diagnostics"){go("lab")}}
                 heading("SYSTEM")
                 button("Setup & Shizuku","Permissions in one place"){go("access")}
                 button("Status bar","Optional Shizuku status bar controls"){go("statusbar")}
@@ -301,16 +322,46 @@ class NexoraActivity : Activity() {
                 add(label("Native motion • 3 seconds expanded, 3 seconds compact. Incoming calls stay open.",14f,muted),14)
                 toggle("Haptic touch","Subtle system feedback on island touches","haptics")
                 toggle("Reduced motion","Short transitions and static waveform","reduce_motion",false)
-                heading("MOTION LAB")
-                button("Notification Morph","Try a sample notification without sending one"){requestIsland("demo_message")}
-                button("Energy Flow","Preview normal charging"){requestIsland("demo_charge")}
-                button("Fast charging","Preview the faster emerald current"){requestIsland("demo_fast")}
-                button("Slow charging","Preview the softer charging pulse"){requestIsland("demo_slow")}
-                button("Connect Pulse","Preview a Wi-Fi connection"){preview(SystemEventType.WIFI_CONNECTED)}
-                button("Bluetooth Flow","Preview an accessory connection"){preview(SystemEventType.BLUETOOTH_CONNECTED)}
-                button("Wake Signature","Preview the locked-state capsule"){requestIsland("demo_lock")}
-                button("Unlock Signature","Preview the orbit, opening lock and traced green check"){requestIsland("demo_unlock")}
-                button("Sound Flow","Live music layout with sample artwork"){calibrating=true;calibrationMode=2;drawCalibration()}
+            }
+            "lab"->{
+                if(!isDev){go("home");return}
+                pageFrame("Motion Lab","DEV ONLY • Local previews, no real calls or connection changes.")
+                add(label("Use only one NEXORA overlay at a time. Disable the consumer accessibility service while testing this edition.",13f,muted),14)
+                heading("SIGNATURE MOTION")
+                button("Notification Morph","Local sample"){requestIsland("demo_message")}
+                button("Charging • normal","84% sample"){requestIsland("demo_charge")}
+                button("Charging • fast","Faster current"){requestIsland("demo_fast")}
+                button("Charging • slow","Softer pulse"){requestIsland("demo_slow")}
+                button("Wi-Fi connection","Sample network: NEXORA Lab"){requestIsland("demo_wifi")}
+                button("Bluetooth connection","Sample accessory: NEXORA Buds"){requestIsland("demo_bluetooth")}
+                button("Wake Signature","Sample locked capsule"){requestIsland("demo_lock")}
+                button("Unlock Signature","Sample confirmation"){requestIsland("demo_unlock")}
+                button("Music preview","Real size calibration with sample artwork"){calibrating=true;calibrationMode=2;drawCalibration()}
+                button("Rapid event sequence","Six local events, 450 ms apart; stresses interrupted transitions"){
+                    if(!CutoutAccessibilityService.bound.value || !prefs.getBoolean("enabled",false)){Toast.makeText(this,"Enable the Dev Island first",Toast.LENGTH_SHORT).show();return@button}
+                    sequenceJob?.cancel()
+                    sequenceJob=mainScope.launch{
+                        for(event in listOf("demo_message","demo_fast","demo_wifi","demo_bluetooth","demo_slow","demo_unlock")){
+                            requestIsland(event);delay(450)
+                        }
+                    }
+                }
+                button("Stop sequence","Cancel remaining simulated events"){sequenceJob?.cancel();requestIsland("demo_clear")}
+                heading("ANDROID NOTIFICATION PIPELINE")
+                button("Send test notification","Actual local Android notification"){postTest{TestNotifier.send(this)}}
+                button("Multiple notifications","Exercise the inbox and queue"){postTest{TestNotifier.sendPair(this)}}
+                button("Download progress","Exercise live progress"){postTest{TestNotifier.sendProgress(this)}}
+                heading("CALL SIMULATION")
+                button("Incoming test call","No real call; answer and decline test buttons"){testCall(TestCaller.Kind.INCOMING)}
+                button("Connected test call","Test call duration"){testCall(TestCaller.Kind.CONNECTED)}
+                button("End simulated call","Does not end real calls"){if(OnCallBus.state.value?.packageName==packageName)TestCaller.end()}
+                heading("DIAGNOSTICS")
+                add(label("Version: "+BuildConfig.VERSION_NAME+" • "+packageName,13f,muted),4)
+                add(label("Overlay: "+CutoutAccessibilityService.bound.value+" • Listener: "+CutoutNotificationListenerService.bound.value,13f,muted),4)
+                add(label("Shizuku: "+ShizukuState.status.value.name+" • Android API "+android.os.Build.VERSION.SDK_INT,13f,muted),4)
+                add(label("Display refresh mode: "+resources.displayMetrics.densityDpi+" dpi • "+(if(android.os.Build.VERSION.SDK_INT>=30)display?.refreshRate else windowManager.defaultDisplay.refreshRate)+" Hz (not measured Island FPS)",13f,muted),4)
+                add(label("Active notifications: "+NotificationInboxBus.items.value.size,13f,muted),12)
+                button("Refresh diagnostics","Read current local state"){drawPage()}
             }
             "activities"->{
                 pageFrame("Live activities","Choose what can appear on the Island.")
@@ -444,7 +495,7 @@ class NexoraActivity : Activity() {
                 button("Phone permission",if(Permissions.isPhoneStateGranted(this))"Granted" else "Optional • improve call-end detection"){
                     requestPermissions(arrayOf(android.Manifest.permission.READ_PHONE_STATE),601)
                 }
-                if(android.os.Build.VERSION.SDK_INT>=33)button("Test notifications",if(Permissions.isPostNotificationGranted(this))"Granted" else "Optional • allow NEXORA test notifications"){
+                if(isDev && android.os.Build.VERSION.SDK_INT>=33)button("Test notifications",if(Permissions.isPostNotificationGranted(this))"Granted" else "Optional • allow NEXORA test notifications"){
                     requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),602)
                 }
                 heading("OPTIONAL CONNECTION DETAILS")
@@ -492,7 +543,7 @@ class NexoraActivity : Activity() {
                 }
             }
             "about"->{
-                pageFrame("About NEXORA","Studio • Reborn")
+                pageFrame(if(isDev)"About NEXORA Dev" else "About NEXORA",BuildConfig.VERSION_NAME+" • Beyond the Island")
                 add(label("Independent Canvas interface, powered by Android media sessions, notification access and accessibility. No network permission.",15f,muted))
                 add(label("GPL-3.0 • Modified from EvanKoe/expressive-cutout. No warranty. Source: github.com/L3viPlayzz/expressive-cutout/tree/nexora-momentum",13f,muted))
                 button("Reset NEXORA preferences","Restore renderer settings; permissions are not removed"){

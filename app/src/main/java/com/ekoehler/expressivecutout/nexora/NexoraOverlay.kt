@@ -1,6 +1,7 @@
 package com.ekoehler.expressivecutout.nexora
 
 import android.accessibilityservice.AccessibilityService
+import com.ekoehler.expressivecutout.BuildConfig
 import android.animation.ValueAnimator
 import android.app.KeyguardManager
 import android.app.PendingIntent
@@ -175,7 +176,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private var mutedApps:Set<String> = emptySet()
     private var foregroundPackage:String?=null
     private fun hidePlayer(pkg:String?)=NexoraPolicy.hideDuplicate(enabled("hide_in_player"),foregroundPackage,pkg)
-    private fun hideCall(pkg:String?)=NexoraPolicy.hideDuplicate(enabled("hide_in_dialer"),foregroundPackage,pkg)
+    private fun hideCall(pkg:String?)=!(BuildConfig.NEXORA_DEV && pkg==service.packageName) && NexoraPolicy.hideDuplicate(enabled("hide_in_dialer"),foregroundPackage,pkg)
     private fun focused()=enabled("focus_mode",false)
     private var batteryLevel = -1
     private val progressKeys=mutableSetOf<String>()
@@ -229,7 +230,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         }
         return base.copy(title=title,detail=subtitle,progress=pct?.div(100f),chargeRate=rate,badge=pct?.let{"$it%"})
     }
-    private fun enabled(key:String, fallback:Boolean=true)=prefs.getBoolean(key,fallback)
+    private fun enabled(key:String, fallback:Boolean=true)=prefs.getBoolean(key,if(key=="enabled")!BuildConfig.NEXORA_DEV else fallback)
     private fun expandedMs()=NexoraPolicy.expandedMillis(3)
     private fun compactMs()=NexoraPolicy.compactMillis(3)
     private fun refreshBattery(intent:android.content.Intent?) {
@@ -419,7 +420,13 @@ class NexoraOverlay(private val service: AccessibilityService) {
         scope.launch { com.ekoehler.expressivecutout.data.AppPreferences(service).disabledPackages.collect { mutedApps=it; render() } }
         scope.launch { NexoraCalibration.mode.collect { render() } }
         scope.launch { NexoraCalibration.requests.collect { request ->
+            if(request.startsWith("demo_") && !BuildConfig.NEXORA_DEV)return@collect
             if(!ringing() && !keyguard.isKeyguardLocked && enabled("enabled")) {
+                if(request=="demo_clear"){flash=null;pending.clear();autoCollapseAt=0L;flashUntil=0L;expanded=false;autoFocus=null;render();return@collect}
+                if(request=="demo_wifi" || request=="demo_bluetooth"){
+                    val wifi=request=="demo_wifi"
+                    show(Card("connect",if(wifi)"Wi-Fi connected" else "Bluetooth connected",if(wifi)"NEXORA Lab" else "NEXORA Buds",BLUE,eventType=if(wifi)"WIFI_CONNECTED" else "BLUETOOTH_CONNECTED",badge=if(wifi)"NEXORA Lab" else "NEXORA Buds"));return@collect
+                }
                 if(request=="demo_unlock"){show(Card("unlock","Unlocked","Animation preview",GREEN));return@collect}
                 if(request in listOf("demo_charge","demo_fast","demo_slow")){
                     val rate=when(request){"demo_fast"->ChargeRate.FAST;"demo_slow"->ChargeRate.SLOW;else->ChargeRate.NORMAL}
@@ -625,7 +632,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         handler.removeCallbacks(refresh)
         handler.removeCallbacks(queuedRender)
         displayVisible=displayAwake()
-        if ((!prefs.getBoolean("enabled", true) && NexoraCalibration.mode.value == 0) || !displayVisible || service.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_PORTRAIT) {
+        if ((!enabled("enabled") && NexoraCalibration.mode.value == 0) || !displayVisible || service.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_PORTRAIT) {
             inboxOpen=false;cancelNotchGesture();removeNotch();flash = null; pending.clear();  expanded = false; browsing = false; autoCollapseAt=0L; autoFocus=null; remove(); return
         }
         val all = cards()

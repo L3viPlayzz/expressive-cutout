@@ -46,6 +46,8 @@ object TestCaller {
      * it. Cycles through the sample callers so repeated taps exercise different name lengths.
      */
     fun toggle(context: Context, kind: Kind) {
+        if (!com.ekoehler.expressivecutout.BuildConfig.NEXORA_DEV) return
+        if (OnCallBus.state.value?.let{it.packageName!=context.packageName}==true) return
         if (OnCallBus.state.value != null) {
             end()
             return
@@ -122,6 +124,7 @@ object TestCaller {
     /** Answer the fake incoming call: flip it to a connected call ticking from now, like a real dialer. */
     fun answer(context: Context) {
         val current = OnCallBus.state.value ?: return
+        if(!com.ekoehler.expressivecutout.BuildConfig.NEXORA_DEV || current.packageName!=context.packageName)return
         OnCallBus.update(
             current.copy(
                 startTimeMs = System.currentTimeMillis(),

@@ -126,7 +126,7 @@ object Permissions {
             }
             if (!isBatteryOptimizationIgnored(context)) add("dumpsys deviceidle whitelist +$pkg")
             if (!isPhoneStateGranted(context)) add("pm grant $pkg $PHONE_STATE")
-            if (!isPostNotificationGranted(context)) add("pm grant $pkg android.permission.POST_NOTIFICATIONS")
+            if (com.ekoehler.expressivecutout.BuildConfig.NEXORA_DEV && !isPostNotificationGranted(context)) add("pm grant $pkg android.permission.POST_NOTIFICATIONS")
         }
         // Attempt each missing grant even when one is blocked by the device.
         return commands.map(ShizukuState::runAsShell).all { it }
