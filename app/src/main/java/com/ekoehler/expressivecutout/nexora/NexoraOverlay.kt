@@ -172,7 +172,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         val subtitle=buildString{
             if(pct!=null)append("$pct% • ")
             append(source)
-            if(rate==ChargeRate.FAST || rate==ChargeRate.SLOW)append(" • Estimated")
+            if(rate!=ChargeRate.UNKNOWN)append(" • Estimated")
         }
         return base.copy(title=title,detail=subtitle,progress=pct?.div(100f),chargeRate=rate,badge=pct?.let{"$it%"})
     }
@@ -325,6 +325,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 }
                 is CutoutSignal.System -> if (!focused() && prefs.getBoolean("events", true)) {
                     val t = signal.type.name
+                    if(t=="CHARGING_STOPPED"){if(flash?.eventType=="CHARGING_STARTED"){flash=null;autoCollapseAt=0L;autoFocus=null;render()};pending.removeAll{it.second.eventType=="CHARGING_STARTED"};return@collect}
                     if(t=="DEVICE_LOCKED"){hadLockedScreen=true;return@collect}
                     if(t=="DEVICE_UNLOCKED"){confirmedUnlock();return@collect}
                     val kind = when {
@@ -374,8 +375,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     show(Card("connect",if(wifi)"Wi-Fi connected" else "Bluetooth connected",if(wifi)"NEXORA Lab" else "NEXORA Buds",BLUE,eventType=if(wifi)"WIFI_CONNECTED" else "BLUETOOTH_CONNECTED",badge=if(wifi)"NEXORA Lab" else "NEXORA Buds"));return@collect
                 }
                 if(request=="demo_unlock"){show(Card("unlock","Unlocked","Animation preview",GREEN));return@collect}
-                if(request in listOf("demo_charge","demo_fast","demo_slow")){
-                    val rate=when(request){"demo_fast"->ChargeRate.FAST;"demo_slow"->ChargeRate.SLOW;else->ChargeRate.NORMAL}
+                if(request in listOf("demo_charge","demo_fast","demo_slow","demo_super")){
+                    val rate=when(request){"demo_super"->ChargeRate.SUPERFAST;"demo_fast"->ChargeRate.FAST;"demo_slow"->ChargeRate.SLOW;else->ChargeRate.NORMAL}
                     show(Card("energy",rate.title,"84% • Preview",GREEN,progress=.84f,chargeRate=rate,badge="84%"));return@collect
                 }
                 if(request=="demo_lock"){show(Card("lock","Locked","Animation preview",VIOLET));return@collect}
@@ -924,13 +925,13 @@ class NexoraOverlay(private val service: AccessibilityService) {
             if(compactAlpha>0f) {
                 if(compactAlpha<.999f) canvas.saveLayerAlpha(0f,0f,w,h,(compactAlpha*255).toInt()) else canvas.save()
                 val playing=!reducedMotion && (preview || NowPlayingBus.state.value?.isPlaying==true)
-                val waveW=dp(23f)
+                val waveW=dp(25f)
                 val start=max(cameraX+cameraRadius+dp(5f),w-dp(10f)-waveW)
                 if(start+waveW<w-dp(4f)) {
                     for(i in 0..4) {
-                        val envelope=if(playing) .66f+.20f*sin(age*4.6f+i*.94f)+.12f*sin(age*7.8f-i*.73f) else .22f
+                        val envelope=if(playing) .52f+.25f*sin(age*4.2f+i*.82f)+.17f*sin(age*6.6f-i*.61f) else .22f
                         val bar=NexoraPolicy.glyphSize(dp(waveHeights[i]*envelope),dp(24f),2f*min(cameraY,topHeight-cameraY)-dp(4f))
-                        val bx=start+i*dp(4.6f)
+                        val bx=start+i*dp(5f)
                         gradient(bx,cameraY-bar/2,dp(3f),bar)
                         canvas.drawRoundRect(bx,cameraY-bar/2,bx+dp(3f),cameraY+bar/2,dp(1.5f),dp(1.5f),paint)
                     }
@@ -963,6 +964,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 if(controls<.999f)canvas.saveLayerAlpha(0f,0f,w,h,(controls*255).toInt())else canvas.save()
                 val gap=dp(5f)*(1f-controls)
                 transport(canvas,w*.34f+gap,buttonsY+gap,-1,dp(18f)*(.9f+.1f*controls))
+                color(0xFF20232D.toInt());canvas.drawCircle(w*.50f,buttonsY+gap,dp(17f),paint)
                 transport(canvas,w*.50f,buttonsY+gap,0,dp(18f))
                 transport(canvas,w*.66f-gap,buttonsY+gap,1,dp(18f)*(.9f+.1f*controls))
                 canvas.restore()
@@ -1019,10 +1021,16 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     color(tone,230);paint.style=Paint.Style.STROKE;paint.strokeWidth=2.4f
                     canvas.drawArc(-21f,-21f,21f,21f,-90f,360f*amount,false,paint)
                     if(!reduced && card.accent==GREEN && age<1.15f){
-                        val end=when(card.chargeRate){ChargeRate.FAST->.80f;ChargeRate.SLOW->1.12f;else->.98f}
+                        val end=when(card.chargeRate){ChargeRate.SUPERFAST->.62f;ChargeRate.FAST->.80f;ChargeRate.SLOW->1.12f;else->.98f}
                         val q=NexoraPolicy.phase(age,.03f,end)
                         val pulse=NexoraPolicy.pulse(age,.02f,end+.03f)
-                        val radius=10f+10f*q
+                        val radius=8f+12f*q
+                        // A second, delayed current follows only on higher measured power.
+                        if(card.chargeRate==ChargeRate.FAST || card.chargeRate==ChargeRate.SUPERFAST){
+                            val echo=NexoraPolicy.pulse(age,.16f,end+.16f)
+                            color(0xFFC6FFE8.toInt(),(110*echo).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.2f
+                            canvas.drawCircle(0f,0f,7f+12f*NexoraPolicy.phase(age,.16f,end+.16f),paint)
+                        }
                         color(GREEN,(90*pulse).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.5f
                         canvas.drawCircle(0f,0f,radius,paint)
                         if(amount>0f){
@@ -1049,7 +1057,11 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     val meet=if(unlocked)NexoraPolicy.phase(age,.26f,.78f) else 0f
                     val arc=if(unlocked)94f+85.5f*meet else 104f
                     val confirm=if(unlocked && !reduced)NexoraPolicy.pulse(age,.45f,1.12f)else 0f
-                    if(confirm>0f){color(GREEN,(70*confirm).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.4f;canvas.drawCircle(0f,0f,16f+4f*meet,paint)}
+                    if(confirm>0f){
+                        val spark=NexoraPolicy.phase(age,.45f,.97f)
+                        color(0xFFB4FFE0.toInt(),(160*confirm).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.4f
+                        for(i in 0..3){val theta=(i*90f+45f+24f*spark)*PI.toFloat()/180f;val r=13f+8f*spark;canvas.drawLine(cos(theta)*r,sin(theta)*r,cos(theta)*(r+2.6f),sin(theta)*(r+2.6f),paint)}
+                        color(GREEN,(70*confirm).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.4f;canvas.drawCircle(0f,0f,16f+4f*meet,paint)}
                     color(tone,235);paint.style=Paint.Style.STROKE;paint.strokeWidth=2.2f;paint.strokeCap=Paint.Cap.ROUND
                     canvas.drawArc(-21f,-21f,21f,21f,-90f+rotate,arc,false,paint)
                     color(if(unlocked)blend(BLUE,GREEN,success)else BLUE,235);paint.style=Paint.Style.STROKE;paint.strokeWidth=2.2f
@@ -1079,7 +1091,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             }
             // A small current moves through the free space below the camera.
             if(isEnergy && !reduced && card.accent==GREEN && age<1.12f && w>dp(100f)){
-                val end=when(card.chargeRate){ChargeRate.FAST->.80f;ChargeRate.SLOW->1.12f;else->1.03f}
+                val end=when(card.chargeRate){ChargeRate.SUPERFAST->.62f;ChargeRate.FAST->.80f;ChargeRate.SLOW->1.12f;else->1.03f}
                 val q=NexoraPolicy.phase(age,.12f,end)
                 val intensity=NexoraPolicy.pulse(age,.10f,end+.06f)
                 val l=dp(12f);val r=w-dp(12f)

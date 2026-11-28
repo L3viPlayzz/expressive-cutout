@@ -331,6 +331,7 @@ class NexoraActivity : Activity() {
                 button("Notification Morph","Local sample"){requestIsland("demo_message")}
                 button("Charging • normal","84% sample"){requestIsland("demo_charge")}
                 button("Charging • fast","Faster current"){requestIsland("demo_fast")}
+                button("Charging • superfast","Twin current pulse"){requestIsland("demo_super")}
                 button("Charging • slow","Softer pulse"){requestIsland("demo_slow")}
                 button("Wi-Fi connection","Sample network: NEXORA Lab"){requestIsland("demo_wifi")}
                 button("Bluetooth connection","Sample accessory: NEXORA Buds"){requestIsland("demo_bluetooth")}
@@ -370,7 +371,7 @@ class NexoraActivity : Activity() {
                 toggle("Timers","Supported clock app timers and stopwatches","timers")
                 toggle("Signature events","Master switch for system events","events")
                 heading("SYSTEM EVENTS")
-                toggle("Charging & battery","Power connected, disconnected, full and low battery","event_energy")
+                toggle("Charging & battery","Power connected, full and low battery","event_energy")
                 toggle("Live charging","Keep the real battery level compact while plugged in","charge_live",false)
                 toggle("Connectivity","Wi-Fi, Bluetooth, VPN, headphones and hotspot","event_connect")
                 toggle("Unlock Signature","Confirmed device unlock, not biometric scanning","event_unlock")

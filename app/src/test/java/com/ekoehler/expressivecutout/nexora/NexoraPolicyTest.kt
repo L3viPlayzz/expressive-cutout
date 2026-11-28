@@ -15,8 +15,10 @@ class NexoraPolicyTest {
         assertNull(ChargeRate.watts(Int.MIN_VALUE,4000))
         assertNull(ChargeRate.watts(0,4000))
         assertEquals(ChargeRate.SLOW,ChargeRate.classify(listOf(2f,2.1f,2.2f),45))
-        assertEquals(ChargeRate.NORMAL,ChargeRate.classify(listOf(5f,6f,6f),45))
-        assertEquals(ChargeRate.FAST,ChargeRate.classify(listOf(11f,12f,12f),45))
+        assertEquals(ChargeRate.SLOW,ChargeRate.classify(listOf(5f,6f,6f),45))
+        assertEquals(ChargeRate.NORMAL,ChargeRate.classify(listOf(15f,16f,16f),45))
+        assertEquals(ChargeRate.FAST,ChargeRate.classify(listOf(21f,22f,22f),45))
+        assertEquals(ChargeRate.SUPERFAST,ChargeRate.classify(listOf(40f,42f,42f),45))
         assertEquals(ChargeRate.UNKNOWN,ChargeRate.classify(listOf(11f,12f,12f),95))
         assertEquals(ChargeRate.UNKNOWN,ChargeRate.classify(listOf(2f,12f,15f),45))
     }

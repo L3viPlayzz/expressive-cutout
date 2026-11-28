@@ -2,7 +2,7 @@ package com.ekoehler.expressivecutout.nexora
 
 /** Net battery input, not adapter output. Thresholds are deliberately conservative. */
 internal enum class ChargeRate(val title:String,val badge:String) {
-    UNKNOWN("Charging",""), SLOW("Slow charging","Slow"), NORMAL("Charging",""), FAST("Fast charging","Fast");
+    UNKNOWN("Charging",""), SLOW("Slow charging","Slow"), NORMAL("Charging","Normal"), FAST("Fast charging","Fast"), SUPERFAST("Superfast charging","Super");
     companion object {
         fun watts(currentMicroamps:Int,voltageMillivolts:Int):Float? {
             if(currentMicroamps<=0 || voltageMillivolts !in 2500..10000)return null
@@ -13,7 +13,7 @@ internal enum class ChargeRate(val title:String,val badge:String) {
             if(samples.size<3 || level !in 0..79)return UNKNOWN
             val v=samples.sorted()
             if(v.last()-v.first()>maxOf(2f,v[v.size/2]*.45f))return UNKNOWN
-            return when {v[v.size/2]<3.5f->SLOW;v[v.size/2]>=10f->FAST;else->NORMAL}
+            return when {v[v.size/2]<15f->SLOW;v[v.size/2]<20f->NORMAL;v[v.size/2]<40f->FAST;else->SUPERFAST}
         }
     }
 }
