@@ -4,15 +4,10 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NexoraPolicyTest {
-    @Test fun quickControlGeometryAndMotion(){
-        assertEquals(0,NexoraPolicy.controlIndex(15f,14f,308f,6f,3))
-        assertEquals(-1,NexoraPolicy.controlIndex(110f,14f,308f,6f,3))
-        assertEquals(2,NexoraPolicy.controlIndex(290f,14f,308f,6f,3))
-        assertEquals(-1,NexoraPolicy.controlIndex(40f,14f,308f,6f,0))
+    @Test fun nativeMotion(){
         assertEquals(.85f,NexoraPolicy.entrySlope(100f,0f,325),.0001f)
         assertEquals(0f,NexoraPolicy.breath(0f,1.8f),.0001f)
         assertEquals(1f,NexoraPolicy.breath(.9f,1.8f),.0001f)
-        assertEquals(QuickControl.PLAY_PAUSE,QuickControl.read(null,1))
     }
     @Test fun notchDoubleTapRequiresTimingAndDistance(){
         assertTrue(NexoraPolicy.isDoubleTap(180,300,8f,24f,true))
@@ -21,7 +16,9 @@ class NexoraPolicyTest {
         assertFalse(NexoraPolicy.isDoubleTap(180,300,8f,24f,false))
         assertEquals(NotchAction.INBOX,NotchGesture.TAP.defaultAction)
         assertEquals(NotchAction.NONE,NotchGesture.DOUBLE.defaultAction)
-        assertEquals(NotchAction.HUB,NotchAction.read("invalid",NotchAction.HUB))
+        assertEquals(NotchAction.QUICK_SETTINGS,NotchGesture.HOLD.defaultAction)
+        assertEquals(NotchAction.QUICK_SETTINGS,NotchAction.read("HUB",NotchAction.NONE))
+        assertEquals(NotchAction.NONE,NotchAction.read("invalid",NotchAction.NONE))
     }
     @Test fun inboxPagesNeverExposeEmptyPage() {
         assertEquals(0,NexoraPolicy.inboxPages(0))

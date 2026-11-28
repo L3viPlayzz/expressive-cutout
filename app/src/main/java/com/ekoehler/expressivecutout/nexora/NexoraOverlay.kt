@@ -40,33 +40,6 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private var params: WindowManager.LayoutParams? = null
     private var flash: Card? = null
     private val pending = java.util.ArrayDeque<Pair<Long,Card>>()
-    private var hub = false
-    private var quickControls=readQuickControls()
-    private var hubVolume=enabled("hub_volume")
-    private var cachedVolume=0f
-    private var lastVolumeStep=-1
-    private fun readQuickControls()=(0..2).map{QuickControl.read(prefs.getString("hub_slot_$it",null),it)}.filter{it!=QuickControl.NONE}.distinct()
-    private fun openHub(){
-        if(ringing() || keyguard.isKeyguardLocked || !enabled("enabled"))return
-        if(hub && current?.kind=="hub"){hub=false;expanded=false;selectedId=null;render();return}
-        if(!hubVolume && quickControls.isEmpty())return
-        cachedVolume=volumeFraction();lastVolumeStep=-1
-        inboxOpen=false;hub=true;browsing=false;expanded=true;autoCollapseAt=0L;autoFocus="hub";render()
-    }
-    private fun runQuickControl(action:QuickControl){
-        if(ringing() || keyguard.isKeyguardLocked)return
-        when(action){
-            QuickControl.NONE->Unit
-            QuickControl.QUICK_SETTINGS->{hub=false;expanded=false;render();service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS)}
-            QuickControl.INBOX->openInbox()
-            QuickControl.PLAY_PAUSE->runCatching{NowPlayingBus.state.value?.transport?.playPause()}
-            QuickControl.NEXT_TRACK->runCatching{NowPlayingBus.state.value?.transport?.next()}
-            QuickControl.PREVIOUS_TRACK->runCatching{NowPlayingBus.state.value?.transport?.previous()}
-            QuickControl.SHADE->{hub=false;expanded=false;render();service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS)}
-            QuickControl.FOCUS->{prefs.edit().putBoolean("focus_mode",!focused()).apply();render()}
-            QuickControl.APP->{hub=false;expanded=false;render();runCatching{service.startActivity(android.content.Intent(service,NexoraActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))}}
-        }
-    }
     private var inboxPage=0
     private var inboxOpen=false
     private var notchTarget:View?=null
@@ -92,7 +65,6 @@ class NexoraOverlay(private val service: AccessibilityService) {
         when(notchAction(gesture)){
             NotchAction.NONE->Unit
             NotchAction.INBOX->if(inboxOpen)closeInbox() else openInbox()
-            NotchAction.HUB->openHub()
             NotchAction.SHADE->service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS)
             NotchAction.QUICK_SETTINGS->service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS)
             NotchAction.NEXT_ACTIVITY->swipe(1,true)
@@ -101,7 +73,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             NotchAction.NEXT_TRACK->runCatching{NowPlayingBus.state.value?.transport?.next()}
             NotchAction.PREVIOUS_TRACK->runCatching{NowPlayingBus.state.value?.transport?.previous()}
             NotchAction.SETTINGS->runCatching{service.startActivity(android.content.Intent(service,NexoraActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))}
-            NotchAction.DISMISS->{inboxOpen=false;hub=false;browsing=false;expanded=false;flash=null;pending.clear();autoCollapseAt=0L;autoFocus=null;selectedId=null;render()}
+            NotchAction.DISMISS->{inboxOpen=false;browsing=false;expanded=false;flash=null;pending.clear();autoCollapseAt=0L;autoFocus=null;selectedId=null;render()}
         }
     }
     private fun notchTouch(owner:View,e:MotionEvent):Boolean{
@@ -153,7 +125,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         if(ringing() || keyguard.isKeyguardLocked || !enabled("enabled"))return
         val rows=eligibleInbox()
         if(rows.isEmpty())return
-        inboxOpen=true;inboxPage=0;hub=false;browsing=false;expanded=true;autoCollapseAt=0L;autoFocus="inbox";selectedId=null
+        inboxOpen=true;inboxPage=0;browsing=false;expanded=true;autoCollapseAt=0L;autoFocus="inbox";selectedId=null
         render()
     }
     private fun closeInbox(){
@@ -208,7 +180,6 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private var batteryLevel = -1
     private val progressKeys=mutableSetOf<String>()
     private var plugged = false
-    private val audio = service.getSystemService(android.media.AudioManager::class.java)
     private fun enabled(key:String, fallback:Boolean=true)=prefs.getBoolean(key,fallback)
     private fun expandedMs()=NexoraPolicy.expandedMillis(3)
     private fun compactMs()=NexoraPolicy.compactMillis(3)
@@ -219,28 +190,12 @@ class NexoraOverlay(private val service: AccessibilityService) {
         batteryLevel=if(level>=0 && scale>0)(level*100/scale).coerceIn(0,100) else -1
         plugged=intent.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED,0)!=0
     }
-    private fun volumeFraction():Float {
-        val a=audio ?: return 0f
-        return runCatching{a.getStreamVolume(android.media.AudioManager.STREAM_MUSIC).toFloat()/a.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)}.getOrDefault(0f)
-    }
-    private fun setVolume(f:Float) {
-        val a=audio ?: return
-        runCatching{
-            val max=a.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-            val step=(f.coerceIn(0f,1f)*max).roundToInt()
-            if(step!=lastVolumeStep){
-                a.setStreamVolume(android.media.AudioManager.STREAM_MUSIC,step,0)
-                lastVolumeStep=step;cachedVolume=volumeFraction()
-                panel?.invalidate()
-            }
-        }
-    }
     private var flashUntil = 0L
     private var autoCollapseAt = 0L
     private var autoFocus: String? = null
     private var selection = 0
     private var selectedId:String?=null
-    private fun Card.identity():String=key?.let{"notification:$it"} ?: when(kind){"music","call","timer","hub","energy","unlock","lock"->kind;else->"$kind:${eventType ?: title}"}
+    private fun Card.identity():String=key?.let{"notification:$it"} ?: when(kind){"music","call","timer","energy","unlock","lock"->kind;else->"$kind:${eventType ?: title}"}
     private var expanded = false
     private var browsing = false
     private var mediaIntent: PendingIntent? = null
@@ -272,7 +227,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private val refresh = Runnable { render() }
     private val queuedRender=Runnable{render()}
     private fun scheduleRender(){handler.removeCallbacks(queuedRender);handler.post(queuedRender)}
-    private val prefListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> reducedMotion=prefs.getBoolean("reduce_motion",false);quickControls=readQuickControls();hubVolume=enabled("hub_volume");NexoraCalibration.integrationEnabled.value=enabled("enabled");scheduleRender() }
+    private val prefListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> reducedMotion=prefs.getBoolean("reduce_motion",false);NexoraCalibration.integrationEnabled.value=enabled("enabled");scheduleRender() }
     private val displayManager = service.getSystemService(android.hardware.display.DisplayManager::class.java)
     private var displayListenerRegistered = false
     private var screenReceiverRegistered = false
@@ -308,7 +263,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             if (intent?.action == android.content.Intent.ACTION_SCREEN_OFF) {
                 handler.removeCallbacks(refresh)
                 displayVisible=false
-                pending.clear(); hub=false; hadLockedScreen=keyguard.isDeviceLocked || keyguard.isKeyguardLocked
+                pending.clear();  hadLockedScreen=keyguard.isDeviceLocked || keyguard.isKeyguardLocked
                 flash = null; expanded = false; browsing = false; current = null; autoCollapseAt = 0L; autoFocus = null
                 inboxOpen=false;cancelNotchGesture();removeNotch();remove()
             } else {
@@ -415,9 +370,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     return@collect
                 }
                 if(request=="inbox"){openInbox();return@collect}
-                if(request=="hub"){openHub();return@collect}
-                flash=null; pending.clear(); autoCollapseAt=0L; expanded=true; hub=request=="hub"; browsing=request=="inbox"; selection=0; selectedId=null
-                autoFocus=if(hub)"hub" else if(NotificationInboxBus.items.value.any{it.progress==null})"message" else "progress"; render()
+                flash=null; pending.clear(); autoCollapseAt=0L; expanded=true; browsing=request=="inbox"; selection=0; selectedId=null
+                autoFocus=if(NotificationInboxBus.items.value.any{it.progress==null})"message" else "progress"; render()
             }
         } }
         scope.launch { ForegroundAppBus.packageName.collect{pkg->foregroundPackage=pkg;scheduleRender()} }
@@ -425,7 +379,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         scope.launch { OnCallBus.state.collect { call ->
             val incoming = call?.ongoing == false
             if (incoming && !wasRinging) {
-                hub=false;cancelNotchGesture()
+                cancelNotchGesture()
                 inboxOpen=false;flash=null; flashUntil=0L; browsing=false
                 expanded=true; autoCollapseAt=0L; autoFocus="call"
             } else if (wasRinging && !incoming) {
@@ -439,7 +393,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         } }
         scope.launch { RunningTimerBus.state.collect { scheduleRender() } }
         scope.launch { DeviceLockBus.locked.collect { locked ->
-            if(locked){inboxOpen=false;cancelNotchGesture();removeNotch();hadLockedScreen=true;flash=null;pending.clear();hub=false;browsing=false;expanded=false;autoCollapseAt=0L;autoFocus=null}
+            if(locked){inboxOpen=false;cancelNotchGesture();removeNotch();hadLockedScreen=true;flash=null;pending.clear();browsing=false;expanded=false;autoCollapseAt=0L;autoFocus=null}
             else if(hadLockedScreen)confirmedUnlock()
             render()
         } }
@@ -451,8 +405,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
         render()
     }
     private fun openLive(kind: String) {
-        if((ringing() || inboxOpen || hub) && kind!="call"){scheduleRender();return}
-        inboxOpen=false;flash=null; flashUntil=0L; hub=false
+        if((ringing() || inboxOpen) && kind!="call"){scheduleRender();return}
+        inboxOpen=false;flash=null; flashUntil=0L
         autoFocus=kind
         browsing=false
         expanded=true
@@ -467,7 +421,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         if(card.kind=="progress" && card.key!=null && card.key==flash?.key){
             flash=card; render(); return
         }
-        if(ringing() || inboxOpen || hub || (enabled("queue_events",false) && flash!=null && now<autoCollapseAt && (card.key==null || card.key!=flash?.key))){
+        if(ringing() || inboxOpen || (enabled("queue_events",false) && flash!=null && now<autoCollapseAt && (card.key==null || card.key!=flash?.key))){
             if(card.key!=null)pending.removeAll{it.second.key==card.key}
             if(pending.size>=8)pending.removeFirst()
             pending.addLast(now to card)
@@ -482,7 +436,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         flashUntil=autoCollapseAt+compactMs()
         autoFocus=card.kind
         selection=0
-        browsing=false; hub=false
+        browsing=false
         expanded=true
     }
     private fun cards(): List<Card> {
@@ -503,7 +457,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         pending.removeAll{(_,card)->card.packageName?.let{it in mutedApps}==true || (card.kind in listOf("message","progress") && !enabled("notifications"))}
         if(flash?.kind=="progress" && !enabled("live_progress"))flash=null
         while(pending.isNotEmpty() && now-pending.peekFirst()!!.first>30000L)pending.removeFirst()
-        if(!locked && !ringing() && !hub && !browsing && !inboxOpen && flash==null && pending.isNotEmpty()) activate(pending.removeFirst().second,now)
+        if(!locked && !ringing() && !browsing && !inboxOpen && flash==null && pending.isNotEmpty()) activate(pending.removeFirst().second,now)
         flash?.takeIf { !locked || (it.kind != "message" && it.kind != "progress") }?.let {
             if(it.kind in setOf("message","progress") && !enabled("message_text")) result.add(it.copy(title=it.packageName?.let{pkg->runCatching{service.packageManager.getApplicationLabel(service.packageManager.getApplicationInfo(pkg,0)).toString()}.getOrNull()} ?: "Notification",detail="",actions=emptyList())) else result.add(it)
         }
@@ -519,8 +473,6 @@ class NexoraOverlay(private val service: AccessibilityService) {
             return listOf(Card("inbox","Notifications","",VIOLET))
         }
         if(inboxOpen){inboxOpen=false;expanded=false}
-        if(hub && !hubVolume && quickControls.isEmpty()){hub=false;expanded=false}
-        if(hub && !ringing())return listOf(Card("hub","Quick controls","",VIOLET))
         if(!focused() && enabled("notifications") && enabled("live_progress")) NotificationInboxBus.items.value.filter{it.packageName !in mutedApps && (it.progress!=null || it.progressIndeterminate) && it.key!=flash?.key}.take(5).forEach{
             result.add(Card("progress",if(enabled("message_text"))it.title.ifBlank{it.appName}else it.appName,it.appName,BLUE,key=it.key,progress=it.progress,appIcon=appIcon(it.packageName)))
         }
@@ -612,7 +564,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         handler.removeCallbacks(queuedRender)
         displayVisible=displayAwake()
         if ((!prefs.getBoolean("enabled", true) && NexoraCalibration.mode.value == 0) || !displayVisible || service.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_PORTRAIT) {
-            inboxOpen=false;cancelNotchGesture();removeNotch();flash = null; pending.clear(); hub=false; expanded = false; browsing = false; autoCollapseAt=0L; autoFocus=null; remove(); return
+            inboxOpen=false;cancelNotchGesture();removeNotch();flash = null; pending.clear();  expanded = false; browsing = false; autoCollapseAt=0L; autoFocus=null; remove(); return
         }
         val all = cards()
         if (all.isEmpty()) { selection=0; selectedId=null; autoFocus=null; browsing=false; expanded=false; current=null; hide();syncNotch();return }
@@ -641,7 +593,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         }
         val next = all[selection]
         val changed = current?.identity()!=next.identity() || (next.kind=="music" && current?.title!=next.title)
-        if(changed && autoCollapseAt==0L && !ringing() && !browsing && !hub && !inboxOpen && flash==null)expanded=false
+        if(changed && autoCollapseAt==0L && !ringing() && !browsing && !inboxOpen && flash==null)expanded=false
         current = next
         selectedId=next.identity()
         val v = panel ?: IslandView().also { panel = it }
@@ -668,7 +620,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         anchorY=(physicalY-topHeight/2f+dp(prefs.getInt("island_y_v2",0).coerceIn(-10,10).toFloat())).roundToInt().coerceIn(minY,maxY)
         val compactWidth=min(screenWidth-dp(12f).toInt(),dp((if(next.kind=="music")136f else if(next.kind=="energy")152f else if(next.kind=="lock" || next.kind=="unlock")144f else 176f)*scale).toInt())
         val width=if(isExpanded)min(screenWidth-dp(12f).toInt(),dp(324f*scale).toInt())else compactWidth
-        val height = topHeight + if (isExpanded) dp(if(next.kind=="inbox")152f else if(next.kind=="hub" && hubVolume)118f else 100f).toInt() else 0
+        val height = topHeight + if (isExpanded) dp(if(next.kind=="inbox")152f else 100f).toInt() else 0
         centerX = cameraX
         val maxOffset = (compactWidth/2f-cameraRadius-dp(44f)).coerceAtLeast(0f)
         anchorX = cameraX + dp(prefs.getInt("island_x",0).coerceIn(-24,24).toFloat()).coerceIn(-maxOffset,maxOffset).toInt()
@@ -713,7 +665,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             }
         }
         v.invalidate()
-        if (preview != 0 || inboxOpen || hub) return
+        if (preview != 0 || inboxOpen) return
         val now=SystemClock.uptimeMillis()
         val nextDeadline=listOf(autoCollapseAt,if(flash!=null)flashUntil else 0L).filter{it>now}.minOrNull()
         handler.postDelayed(refresh, min(1000L,(nextDeadline?.minus(now) ?: 1000L).coerceAtLeast(1L)))
@@ -747,7 +699,6 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private fun swipe(delta: Int,fromNotch:Boolean=false) {
         if(ringing())return
         if(inboxOpen){val next=NexoraPolicy.inboxPage(inboxPage+delta,inboxRows.size);if(next!=inboxPage){inboxPage=next;panel?.pageTransition(delta)};return}
-        if(hub)return
         if(!fromNotch && !enabled("swipe_switch"))return
         autoCollapseAt=0L; autoFocus=null
         browsing = enabled("inbox")
@@ -786,21 +737,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
             return
         }
         if (!expanded) { expanded = true; render(); return }
-        if (y < (panel?.topHeight ?: 0f)) { if(!ringing()){expanded = false; hub=false; render()}; return }
+        if (y < (panel?.topHeight ?: 0f)) { if(!ringing()){expanded = false;  render()}; return }
         if (keyguard.isKeyguardLocked) return
-        if(c.kind=="hub") {
-            val w=panel?.visualWidth ?: return
-            val top=panel?.topHeight ?: return
-            if(hubVolume && y in (top+dp(28f))..(top+dp(54f)))setVolume((x-dp(20f))/(w-dp(40f)).coerceAtLeast(1f))
-            else {
-                val start=top+dp(if(hubVolume)61f else 32f)
-                if(y in start..(start+dp(45f))){
-                    val idx=NexoraPolicy.controlIndex(x,dp(14f),w-dp(14f),dp(6f),quickControls.size)
-                    quickControls.getOrNull(idx)?.let{runQuickControl(it)}
-                }
-            }
-            return
-        }
         if (c.kind == "music" && y > (panel?.topHeight ?: 0f) + dp(58f)) {
             NowPlayingBus.state.value?.transport?.let {
                 val fraction = x / (panel?.visualWidth?.coerceAtLeast(1f) ?: 1f)
@@ -866,7 +804,6 @@ class NexoraOverlay(private val service: AccessibilityService) {
         private var notchRoute=false
         private var maxTravel=0f
         private var downTime = 0L
-        private var draggingVolume=false
         var cameraX = 0f; var cameraY = 0f; var cameraRadius = 0f; var topHeight = 0f
         var visualX=0f; var visualY=0f; var visualWidth=0f; var visualHeight=0f
         var drawX=0f; var drawY=0f
@@ -1258,55 +1195,6 @@ class NexoraOverlay(private val service: AccessibilityService) {
             }
             canvas.restore()
         }
-        private fun quickGlyph(canvas:Canvas,action:QuickControl,x:Float,y:Float){
-            canvas.save();canvas.translate(x,y);canvas.scale(dp(1f),dp(1f))
-            color(if(action==QuickControl.FOCUS && focused())GREEN else 0xFFE0E4EB.toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.6f;paint.strokeCap=Paint.Cap.ROUND;paint.strokeJoin=Paint.Join.ROUND
-            when(action){
-                QuickControl.QUICK_SETTINGS->{canvas.drawLine(-7f,-4f,7f,-4f,paint);canvas.drawLine(-7f,4f,7f,4f,paint);canvas.drawCircle(-2f,-4f,2f,paint);canvas.drawCircle(3f,4f,2f,paint)}
-                QuickControl.INBOX->{canvas.drawRoundRect(-7f,-5f,7f,5f,2.5f,2.5f,paint);canvas.drawLine(-6f,-4f,0f,1f,paint);canvas.drawLine(0f,1f,6f,-4f,paint)}
-                QuickControl.PLAY_PAUSE->{if(NowPlayingBus.state.value?.isPlaying==true){canvas.drawLine(-3f,-6f,-3f,6f,paint);canvas.drawLine(3f,-6f,3f,6f,paint)}else{path.reset();path.moveTo(-4f,-6f);path.lineTo(6f,0f);path.lineTo(-4f,6f);path.close();paint.style=Paint.Style.FILL;canvas.drawPath(path,paint)}}
-                QuickControl.NEXT_TRACK,QuickControl.PREVIOUS_TRACK->{val dir=if(action==QuickControl.NEXT_TRACK)1f else -1f;path.reset();path.moveTo(-5f*dir,-6f);path.lineTo(3f*dir,0f);path.lineTo(-5f*dir,6f);path.close();paint.style=Paint.Style.FILL;canvas.drawPath(path,paint);canvas.drawLine(6f*dir,-6f,6f*dir,6f,paint)}
-                QuickControl.SHADE->{canvas.drawRoundRect(-7f,-6f,7f,6f,2.5f,2.5f,paint);canvas.drawLine(-4f,-2f,4f,-2f,paint);canvas.drawLine(-4f,2f,1f,2f,paint)}
-                QuickControl.FOCUS->{canvas.drawArc(-6f,-6f,6f,6f,45f,270f,false,paint);canvas.drawArc(-1f,-8f,9f,2f,100f,150f,false,paint)}
-                QuickControl.APP->{canvas.drawLine(-5f,6f,-5f,-6f,paint);canvas.drawLine(-5f,-6f,5f,6f,paint);canvas.drawLine(5f,6f,5f,-6f,paint)}
-                QuickControl.NONE->Unit
-            }
-            paint.style=Paint.Style.FILL;canvas.restore()
-        }
-        private fun drawQuickControls(canvas:Canvas,w:Float,h:Float,e:Float){
-            val a=NexoraPolicy.phase(e,.20f,.83f)
-            if(a<=0f)return
-            if(a<.999f)canvas.saveLayerAlpha(0f,topHeight,w,h,(a*255).toInt())else canvas.save()
-            val y=topHeight
-            val l=dp(14f);val r=w-l
-            text(canvas,"Quick controls",l,y+dp(20f),15f,Color.WHITE,r-l,true)
-            if(hubVolume){
-                val volume=cachedVolume
-                val vl=dp(20f);val vr=w-vl;val by=y+dp(39f)
-                color(0xFF24262C.toInt());canvas.drawRoundRect(vl,by,vr,by+dp(8f),dp(4f),dp(4f),paint)
-                if(volume>0f){gradient(vl,by,vr-vl,dp(8f));canvas.drawRoundRect(vl,by,vl+(vr-vl)*volume,by+dp(8f),dp(4f),dp(4f),paint)}
-                color(Color.WHITE);canvas.drawCircle(vl+(vr-vl)*volume,by+dp(4f),dp(5f),paint)
-            }
-            val n=quickControls.size
-            if(n>0){
-                val gap=dp(6f);val bw=(r-l-gap*(n-1))/n
-                val yy=y+dp(if(hubVolume)61f else 32f)
-                quickControls.forEachIndexed{i,action->
-                    val f=NexoraPolicy.phase(e,.34f+i*.05f,.88f+i*.04f)
-                    if(f>0f){
-                        val x=l+i*(bw+gap)
-                        canvas.save()
-                        canvas.translate(0f,dp(4f)*(1f-f))
-                        color(if(action==QuickControl.FOCUS && focused())0xFF17362C.toInt() else 0xFF191B21.toInt(),(255*f).toInt())
-                        canvas.drawRoundRect(x,yy,x+bw,yy+dp(45f),dp(13f),dp(13f),paint)
-                        quickGlyph(canvas,action,x+bw/2,yy+dp(14f))
-                        text(canvas,action.shortLabel,x+dp(5f),yy+dp(35f),10f,0xFFC9CED8.toInt(),bw-dp(10f),true)
-                        canvas.restore()
-                    }
-                }
-            }
-            canvas.restore()
-        }
         private fun drawInbox(canvas:Canvas,w:Float,h:Float,e:Float){
             val a=NexoraPolicy.phase(e,.20f,.82f)
             if(a<=0f)return
@@ -1364,7 +1252,6 @@ class NexoraOverlay(private val service: AccessibilityService) {
             try {
             // Reference has a pure black silhouette without a visible outline.
             if(card.kind=="inbox") {drawInbox(canvas,w,h,((h-topHeight)/dp(152f)).coerceIn(0f,1f));if(!reducedMotion && age<.14f)postInvalidateOnAnimation();return}
-            if(card.kind=="hub"){drawQuickControls(canvas,w,h,((h-topHeight)/dp(if(hubVolume)118f else 100f)).coerceIn(0f,1f));if(!reducedMotion && age<.14f)postInvalidateOnAnimation();return}
             if(card.kind=="music") {
                 if(w>dp(105f)) musicLayout(canvas,w,h,expansion,age)
                 if(!reducedMotion && (age<1.3f || preview || NowPlayingBus.state.value?.isPlaying==true))postInvalidateOnAnimation()
@@ -1493,7 +1380,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             val localX=event.x-drawX;val localY=event.y-drawY
             if(event.actionMasked==MotionEvent.ACTION_DOWN){
                 val pad=dp(prefs.getInt("notch_padding",6).coerceIn(0,12).toFloat())
-                touchActive=false;draggingVolume=false
+                touchActive=false
                 notchRoute=notchAllowed() && geometry?.isRunning!=true && localY in 0f..topHeight &&
                     abs(localX-cameraX)<=cameraRadius+pad
             }
@@ -1511,38 +1398,34 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     touchActive=geometry?.isRunning!=true
                     downX=event.rawX;downY=event.rawY;downTime=SystemClock.uptimeMillis()
                     downCard=card.identity();downExpanded=open;maxTravel=0f
-                    draggingVolume=touchActive && card.kind=="hub" && hubVolume && open && localY in (topHeight+dp(28f))..(topHeight+dp(54f))
-                    if(draggingVolume)setVolume((localX-dp(20f))/(visualWidth-dp(40f)).coerceAtLeast(1f))
                     if(touchActive && enabled("haptics"))performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                     return true
                 }
                 MotionEvent.ACTION_MOVE->{
                     maxTravel=max(maxTravel,hypot(event.rawX-downX,event.rawY-downY))
-                    if(downCard!=card.identity() || downExpanded!=open || geometry?.isRunning==true){touchActive=false;draggingVolume=false}
-                    if(touchActive && draggingVolume)setVolume((localX-dp(20f))/(visualWidth-dp(40f)).coerceAtLeast(1f))
+                    if(downCard!=card.identity() || downExpanded!=open || geometry?.isRunning==true){touchActive=false}
                     return true
                 }
-                MotionEvent.ACTION_POINTER_DOWN->{touchActive=false;draggingVolume=false;return true}
+                MotionEvent.ACTION_POINTER_DOWN->{touchActive=false;return true}
                 MotionEvent.ACTION_UP->{
                     val valid=touchActive && downCard==card.identity() && downExpanded==open && geometry?.isRunning!=true
                     touchActive=false
-                    if(draggingVolume){draggingVolume=false;return true}
                     if(!valid)return true
                     val dx=event.rawX-downX;val dy=event.rawY-downY
                     val slop=max(dp(32f),ViewConfiguration.get(service).scaledTouchSlop*2f)
                     when(NexoraPolicy.gesture(dx,dy,slop,SystemClock.uptimeMillis()-downTime)){
                         1->swipe(1)
                         -1->swipe(-1)
-                        2->if(!ringing() && enabled("swipe_close")){inboxOpen=false;flash=null;pending.clear();hub=false;expanded=false;browsing=false;selection=0;selectedId=null;autoCollapseAt=0L;autoFocus=null;render()}
+                        2->if(!ringing() && enabled("swipe_close")){inboxOpen=false;flash=null;pending.clear();expanded=false;browsing=false;selection=0;selectedId=null;autoCollapseAt=0L;autoFocus=null;render()}
                         5->if(enabled("swipe_shade") && !ringing() && !open){service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS)}
                         4->if(!ringing() && maxTravel<slop){
-                            openHub()
+                            service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS)
                         }
                         0->if(maxTravel<slop && localX in 0f..visualWidth && localY in 0f..visualHeight){performClick();tap(localX,localY)}
                     }
                     return true
                 }
-                MotionEvent.ACTION_CANCEL->{touchActive=false;draggingVolume=false;return true}
+                MotionEvent.ACTION_CANCEL->{touchActive=false;return true}
                 else->return true
             }
         }

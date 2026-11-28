@@ -277,7 +277,6 @@ class NexoraActivity : Activity() {
                 button("Live activities","Music, timers, charging and connections"){go("activities")}
                 button("Notifications","Privacy, queue and inbox"){go("notifications")}
                 button("Notch Touch","Camera gestures and sensitivity"){go("notch")}
-                button("Quick Controls","Personalize your three shortcuts and volume"){go("quick")}
                 button("Gestures","Island touch preferences"){go("gestures")}
                 heading("SYSTEM")
                 button("Setup & Shizuku","Permissions in one place"){go("access")}
@@ -415,41 +414,14 @@ class NexoraActivity : Activity() {
                     edit.remove("notch_padding").remove("notch_swipe_distance").apply();drawPage()
                 }
             }
-            "quick"->{
-                pageFrame("Quick Controls","Your shortcuts. Always one long press away.")
-                toggle("Media volume","Show the adjustable volume slider","hub_volume")
-                heading("SHORTCUTS")
-                for(slot in 0..2){
-                    val current=QuickControl.read(prefs.getString("hub_slot_$slot",null),slot)
-                    button("Shortcut ${slot+1}",current.label){
-                        val values=QuickControl.entries
-                        android.app.AlertDialog.Builder(this).setTitle("Shortcut ${slot+1}")
-                            .setSingleChoiceItems(values.map{it.label}.toTypedArray(),values.indexOf(current)){dialog,which->
-                                val chosen=values[which]
-                                val edit=prefs.edit().putString("hub_slot_$slot",chosen.name)
-                                if(chosen!=QuickControl.NONE)for(other in 0..2){
-                                    if(other!=slot && QuickControl.read(prefs.getString("hub_slot_$other",null),other)==chosen)edit.putString("hub_slot_$other",QuickControl.NONE.name)
-                                }
-                                edit.apply();dialog.dismiss();drawPage()
-                            }.setNegativeButton("Cancel",null).show()
-                    }
-                }
-                button("Preview Quick Controls","Open the actual Island"){requestIsland("hub")}
-                button("Reset layout","Quick settings • play/pause • inbox"){
-                    val edit=prefs.edit().remove("hub_volume");for(slot in 0..2)edit.remove("hub_slot_$slot")
-                    edit.apply();drawPage()
-                }
-                add(label("Controls use Android or media-session actions. Music shortcuts need an active player.",13f,muted))
-            }
             "gestures"->{
                 pageFrame("Gestures & controls","Stay in control without opening another app.")
                 button("Notch Touch","Configure the camera opening separately"){go("notch")}
                 toggle("Swipe horizontally","Switch between live activities","swipe_switch")
                 toggle("Swipe up","Dismiss the temporary island view","swipe_close")
                 toggle("Swipe down","Open Android notifications from the compact island","swipe_shade")
-                button("Quick Controls","Edit shortcuts and preview your controls"){go("quick")}
                 heading("TOUCH")
-                add(label("Tap the camera opening for the notification inbox. Swipe between pages; tap a message to open it. Tap outside the camera area to expand a live activity. Incoming calls override navigation gestures until answered or declined.",14f,muted))
+                add(label("Tap the camera opening for the notification inbox. Swipe between pages; tap a message to open it. Tap outside the camera area to expand a live activity. Long press opens Android quick settings by default. Incoming calls override navigation gestures until answered or declined.",14f,muted))
             }
             "access"->{
                 pageFrame("Setup & Shizuku","Grant the permissions needed for NEXORA.")
