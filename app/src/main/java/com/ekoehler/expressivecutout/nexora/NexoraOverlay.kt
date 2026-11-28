@@ -1020,31 +1020,28 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     // the progress ring, then dissipates. The battery arc stays truthful.
                     color(tone,230);paint.style=Paint.Style.STROKE;paint.strokeWidth=2.4f
                     canvas.drawArc(-21f,-21f,21f,21f,-90f,360f*amount,false,paint)
-                    if(!reduced && card.accent==GREEN && age<1.15f){
-                        val end=when(card.chargeRate){ChargeRate.SUPERFAST->.62f;ChargeRate.FAST->.80f;ChargeRate.SLOW->1.12f;else->.98f}
-                        val q=NexoraPolicy.phase(age,.03f,end)
-                        val pulse=NexoraPolicy.pulse(age,.02f,end+.03f)
-                        val radius=8f+12f*q
-                        // A second, delayed current follows only on higher measured power.
-                        if(card.chargeRate==ChargeRate.FAST || card.chargeRate==ChargeRate.SUPERFAST){
-                            val echo=NexoraPolicy.pulse(age,.16f,end+.16f)
-                            color(0xFFC6FFE8.toInt(),(110*echo).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.2f
-                            canvas.drawCircle(0f,0f,7f+12f*NexoraPolicy.phase(age,.16f,end+.16f),paint)
+                    // Pulse family: same orbital grammar, different cadence per tier.
+                    val confirmedAge=rateAge()
+                    val energyAge=if(confirmedAge<1.2f)confirmedAge else age
+                    if(!reduced && card.accent==GREEN && energyAge<1.2f){
+                        val profile=card.chargeRate
+                        val count=when(profile){ChargeRate.SUPERFAST->4;ChargeRate.FAST->3;ChargeRate.NORMAL->2;else->1}
+                        val duration=when(profile){ChargeRate.SLOW->1.05f;ChargeRate.NORMAL->.84f;ChargeRate.FAST->.68f;ChargeRate.SUPERFAST->.54f;else->.92f}
+                        val spacing=when(profile){ChargeRate.SUPERFAST->.13f;ChargeRate.FAST->.18f;else->.24f}
+                        for(i in 0 until count){
+                            val offset=i*spacing
+                            val u=(energyAge-offset)/duration
+                            if(u<=0f || u>=1f)continue
+                            val q=NexoraPolicy.smoothstep(u)
+                            val fade=NexoraPolicy.pulse(u,0f,1f)
+                            val r=10f+10f*q
+                            color(blend(GREEN,0xFFC6FFE8.toInt(),q),(175*fade).toInt())
+                            paint.style=Paint.Style.STROKE;paint.strokeWidth=1.2f+fade*.9f;paint.strokeCap=Paint.Cap.ROUND
+                            val sweep=42f+52f*q
+                            val angle=-90f+q*270f+i*28f
+                            canvas.drawArc(-r,-r,r,r,angle,sweep,false,paint)
+                            canvas.drawArc(-r,-r,r,r,angle+180f,sweep,false,paint)
                         }
-                        color(GREEN,(90*pulse).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.5f
-                        canvas.drawCircle(0f,0f,radius,paint)
-                        if(amount>0f){
-                            val sweep=min(360f*amount,72f)
-                            color(0xFFC6FFE8.toInt(),(220*pulse).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=3.0f
-                            canvas.drawArc(-21f,-21f,21f,21f,-90f+360f*amount-sweep,sweep,false,paint)
-                        }
-                    }
-                    val confirmAge=rateAge()
-                    if(!reduced && confirmAge<.8f){
-                        val pulse=NexoraPolicy.pulse(confirmAge,0f,.8f)
-                        val r=14f+7f*NexoraPolicy.phase(confirmAge,0f,.8f)
-                        color(tone,(170*pulse).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.6f
-                        canvas.drawCircle(0f,0f,r,paint)
                     }
                     val bolt=NexoraPolicy.phase(age,.06f,.48f)
                     effectPath.reset();effectPath.moveTo(3f,-14f);effectPath.lineTo(-9f,1f);effectPath.lineTo(-1f,1f);effectPath.lineTo(-4f,14f);effectPath.lineTo(10f,-3f);effectPath.lineTo(2f,-3f);effectPath.close()
@@ -1052,39 +1049,46 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     trace(canvas,effectPath,bolt)
                     color(tone,(255*NexoraPolicy.phase(age,.25f,.58f)).toInt());canvas.drawPath(effectPath,paint)
                 } else {
-                    // Two orbit segments converge as the actual lock turns into a check.
-                    val rotate=if(reduced)0f else if(unlocked)NexoraPolicy.phase(age,0f,.66f)*180f else NexoraPolicy.phase(age,0f,.85f)*90f
-                    val meet=if(unlocked)NexoraPolicy.phase(age,.26f,.78f) else 0f
-                    val arc=if(unlocked)94f+85.5f*meet else 104f
-                    val confirm=if(unlocked && !reduced)NexoraPolicy.pulse(age,.45f,1.12f)else 0f
-                    if(confirm>0f){
-                        val spark=NexoraPolicy.phase(age,.45f,.97f)
-                        color(0xFFB4FFE0.toInt(),(160*confirm).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.4f
-                        for(i in 0..3){val theta=(i*90f+45f+24f*spark)*PI.toFloat()/180f;val r=13f+8f*spark;canvas.drawLine(cos(theta)*r,sin(theta)*r,cos(theta)*(r+2.6f),sin(theta)*(r+2.6f),paint)}
-                        color(GREEN,(70*confirm).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.4f;canvas.drawCircle(0f,0f,16f+4f*meet,paint)}
-                    color(tone,235);paint.style=Paint.Style.STROKE;paint.strokeWidth=2.2f;paint.strokeCap=Paint.Cap.ROUND
-                    canvas.drawArc(-21f,-21f,21f,21f,-90f+rotate,arc,false,paint)
-                    color(if(unlocked)blend(BLUE,GREEN,success)else BLUE,235);paint.style=Paint.Style.STROKE;paint.strokeWidth=2.2f
-                    canvas.drawArc(-21f,-21f,21f,21f,90f+rotate,arc,false,paint)
-                    val lift=if(unlocked)NexoraPolicy.phase(age,.02f,.40f)else 0f
-                    val morph=if(unlocked)NexoraPolicy.phase(age,.34f,.78f)else 0f
+                    // Continuity unlock: two curved rails become a single open aperture,
+                    // then the shackle and body resolve into a drawn confirmation mark.
+                    val lift=if(unlocked)NexoraPolicy.phase(age,.02f,.38f)else 0f
+                    val morph=if(unlocked)NexoraPolicy.phase(age,.28f,.76f)else 0f
+                    val settle=if(unlocked)NexoraPolicy.phase(age,.70f,1.04f)else 0f
+                    val orbitFade=if(unlocked)1f-.62f*settle else 1f
+                    val angle=if(unlocked)140f*lift else 0f
+                    val radius=21f-2f*morph+2f*settle
+                    val sweep=if(unlocked)112f-40f*morph+78f*settle else 104f
+                    color(tone,(220*orbitFade).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=2.2f;paint.strokeCap=Paint.Cap.ROUND
+                    canvas.drawArc(-radius,-radius,radius,radius,-90f+angle,sweep,false,paint)
+                    color(blend(BLUE,GREEN,success),(220*orbitFade).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=2.2f
+                    canvas.drawArc(-radius,-radius,radius,radius,90f+angle,sweep,false,paint)
                     val lockAlpha=(255*(1f-morph)).toInt()
                     if(lockAlpha>0){
                         color(tone,lockAlpha);paint.style=Paint.Style.STROKE;paint.strokeWidth=2.3f;paint.strokeJoin=Paint.Join.ROUND
-                        canvas.save();canvas.rotate(-32f*lift,-6f,1f);canvas.translate(0f,-2.5f*lift)
+                        canvas.save();canvas.rotate(-48f*lift,-6f,1f);canvas.translate(0f,-3f*lift)
                         securityPath.reset();securityPath.moveTo(-6f,0f);securityPath.lineTo(-6f,-5f);securityPath.cubicTo(-6f,-13f,6f,-13f,6f,-5f);securityPath.lineTo(6f,0f)
                         canvas.drawPath(securityPath,paint);canvas.restore()
-                        val bw=9f*(1f-.22f*morph);val bh=6.5f*(1f-.30f*morph)
+                        val bw=9f*(1f-.35f*morph);val bh=6.5f*(1f-.35f*morph)
                         canvas.drawRoundRect(-bw,5.5f-bh,bw,5.5f+bh,3f,3f,paint)
                         canvas.drawLine(0f,4f,0f,7f,paint)
                     }
                     if(morph>0f){
-                        val settle=if(reduced)1f else NexoraPolicy.phase(age,.70f,.96f)
-                        val pulse=if(reduced)0f else sin(PI.toFloat()*settle)*.08f
-                        canvas.save();canvas.scale(.94f+.06f*settle+pulse,.94f+.06f*settle+pulse)
+                        canvas.save()
+                        val scale=.86f+.14f*morph+if(reduced)0f else .05f*NexoraPolicy.pulse(age,.60f,1.04f)
+                        canvas.scale(scale,scale)
                         color(GREEN);paint.style=Paint.Style.STROKE;paint.strokeWidth=3.2f;paint.strokeCap=Paint.Cap.ROUND;paint.strokeJoin=Paint.Join.ROUND
                         securityPath.reset();securityPath.moveTo(-9f,0f);securityPath.lineTo(-2f,7f);securityPath.lineTo(10f,-7f)
                         trace(canvas,securityPath,morph);canvas.restore()
+                    }
+                    if(unlocked && !reduced){
+                        val wave=NexoraPolicy.phase(age,.62f,1.16f)
+                        val alpha=NexoraPolicy.pulse(age,.62f,1.16f)
+                        if(alpha>0f){
+                            color(0xFFB4FFE0.toInt(),(125*alpha).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.3f
+                            val r=13f+9f*wave
+                            canvas.drawArc(-r,-r,r,r,-45f-50f*wave,55f,false,paint)
+                            canvas.drawArc(-r,-r,r,r,135f-50f*wave,55f,false,paint)
+                        }
                     }
                 }
                 paint.style=Paint.Style.FILL;canvas.restore()
@@ -1316,7 +1320,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             }
             if(card.kind=="energy" || card.kind=="unlock" || card.kind=="lock") {
                 signatureLayout(canvas,w,h,expansion,age)
-                if((age<1.3f || (card.kind=="energy" && rateAge()<.8f)) && !reducedMotion)postInvalidateOnAnimation()
+                if((age<1.3f || (card.kind=="energy" && rateAge()<1.2f)) && !reducedMotion)postInvalidateOnAnimation()
                 return
             }
             if (w < dp(82f)) { if(age<1.3f && !reducedMotion) postInvalidateOnAnimation(); return }
