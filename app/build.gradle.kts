@@ -23,7 +23,7 @@ android {
     defaultConfig {
         applicationId = "com.nexora.island"
         minSdk = 29
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 8
         versionName = "1.0.0-beta"
     }
