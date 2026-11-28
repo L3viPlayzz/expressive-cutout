@@ -196,7 +196,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private var autoFocus: String? = null
     private var selection = 0
     private var selectedId:String?=null
-    private fun Card.identity():String=key?.let{"notification:$it"} ?: when(kind){"music","call","timer","energy","unlock","lock"->kind;else->"$kind:${eventType ?: title}"}
+    private var demoSerial=0L
+    private fun Card.identity():String=demoId?.let{"demo:$it"} ?: key?.let{"notification:$it"} ?: when(kind){"music","call","timer","energy","unlock","lock"->kind;else->"$kind:${eventType ?: title}"}
     private var expanded = false
     private var browsing = false
     private var mediaIntent: PendingIntent? = null
@@ -279,7 +280,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         }
     }
     private data class Card(val kind: String, val title: String, val detail: String = "", val accent: Int = BLUE,
-        val intent: PendingIntent? = null, val key: String? = null, val progress: Float? = null, val appIcon: android.graphics.drawable.Drawable? = null, val actions: List<CutoutSignal.Notification.Action> = emptyList(), val settingsAction:String?=null, val packageName:String?=null, val eventType:String?=null, val chargeRate:ChargeRate=ChargeRate.UNKNOWN, val badge:String?=null)
+        val intent: PendingIntent? = null, val key: String? = null, val progress: Float? = null, val appIcon: android.graphics.drawable.Drawable? = null, val actions: List<CutoutSignal.Notification.Action> = emptyList(), val settingsAction:String?=null, val packageName:String?=null, val eventType:String?=null, val chargeRate:ChargeRate=ChargeRate.UNKNOWN, val badge:String?=null,val demoId:Long?=null)
     companion object {
         private val BLUE = Color.rgb(99, 202, 255)
         private val VIOLET = Color.rgb(181, 151, 255)
@@ -374,14 +375,14 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     val wifi=request=="demo_wifi"
                     show(Card("connect",if(wifi)"Wi-Fi connected" else "Bluetooth connected",if(wifi)"NEXORA Lab" else "NEXORA Buds",BLUE,eventType=if(wifi)"WIFI_CONNECTED" else "BLUETOOTH_CONNECTED",badge=if(wifi)"NEXORA Lab" else "NEXORA Buds"));return@collect
                 }
-                if(request=="demo_unlock"){show(Card("unlock","Unlocked","Animation preview",GREEN));return@collect}
+                if(request=="demo_unlock"){show(Card("unlock","Unlocked","Animation preview",GREEN,demoId=++demoSerial));return@collect}
                 if(request in listOf("demo_charge","demo_fast","demo_slow","demo_super")){
                     val rate=when(request){"demo_super"->ChargeRate.SUPERFAST;"demo_fast"->ChargeRate.FAST;"demo_slow"->ChargeRate.SLOW;else->ChargeRate.NORMAL}
-                    show(Card("energy",rate.title,"84% • Preview",GREEN,progress=.84f,chargeRate=rate,badge="84%"));return@collect
+                    show(Card("energy",rate.title,"84% • Preview",GREEN,progress=.84f,chargeRate=rate,badge="84%",demoId=++demoSerial));return@collect
                 }
-                if(request=="demo_lock"){show(Card("lock","Locked","Animation preview",VIOLET));return@collect}
+                if(request=="demo_lock"){show(Card("lock","Locked","Animation preview",VIOLET,demoId=++demoSerial));return@collect}
                 if(request=="demo_message") {
-                    show(Card("message","NEXORA preview","Your notification animation",BLUE,appIcon=appIcon(service.packageName)))
+                    show(Card("message","NEXORA preview","Your notification animation",BLUE,appIcon=appIcon(service.packageName),demoId=++demoSerial))
                     return@collect
                 }
                 if(request=="inbox"){openInbox();return@collect}

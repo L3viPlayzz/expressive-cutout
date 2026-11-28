@@ -210,7 +210,8 @@ class NexoraActivity : Activity() {
     private fun requestIsland(kind:String){
         if(kind.startsWith("demo_") && !isDev)return
         if(!CutoutAccessibilityService.bound.value){Toast.makeText(this,"Enable accessibility first",Toast.LENGTH_LONG).show();return}
-        NexoraCalibration.requests.tryEmit(kind)
+        if(kind.startsWith("demo_") && !prefs.getBoolean("enabled",!isDev)){Toast.makeText(this,"Enable NEXORA Island first",Toast.LENGTH_SHORT).show();return}
+        if(!NexoraCalibration.requests.tryEmit(kind))Toast.makeText(this,"Island busy; try again",Toast.LENGTH_SHORT).show()
     }
     private fun choice(title:String,key:String,choices:List<Pair<String,Int>>,default:Int){
         add(label(title,15f,white,true),7)
@@ -308,6 +309,16 @@ class NexoraActivity : Activity() {
                 pageFrame("Appearance","The original NEXORA silhouette. Pure black, no border.")
                 button("Size & position","Adjust the real overlay with three live preview modes"){calibrating=true;calibrationMode=1;drawCalibration()}
                 heading("PROPORTIONS")
+                button("Recommended • Pixel","Clean centered geometry, full motion and quiet notifications"){
+                    android.app.AlertDialog.Builder(this).setTitle("Apply recommended settings?").setMessage("Updates NEXORA appearance, motion, notification and activity preferences. Permissions and app exclusions stay unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Apply"){_,_->
+                        prefs.edit().putInt("island_width",100).putInt("island_height_v2",28).putInt("island_x",0).putInt("island_y_v2",0)
+                            .putBoolean("focus_mode",false).putBoolean("haptics",true).putBoolean("reduce_motion",false)
+                            .putBoolean("music",true).putBoolean("hide_in_player",true).putBoolean("timers",true).putBoolean("events",true)
+                            .putBoolean("event_energy",true).putBoolean("charge_live",false).putBoolean("event_connect",true).putBoolean("event_unlock",true).putBoolean("lock_wake",false).putBoolean("event_system",false).putBoolean("hide_in_dialer",true)
+                            .putBoolean("notifications",true).putBoolean("silent_notifications",false).putBoolean("message_text",true).putBoolean("queue_events",false).putBoolean("live_progress",true).putBoolean("inbox",true).putBoolean("notch_inbox",true).putBoolean("swipe_switch",true).putBoolean("swipe_close",true).putBoolean("swipe_shade",false).apply()
+                        calibrating=true;calibrationMode=1;drawCalibration()
+                    }.show()
+                }
                 button("Slim preset","136 dp music base • 24 dp height • centered"){
                     prefs.edit().putInt("island_width",95).putInt("island_height_v2",24).putInt("island_x",0).putInt("island_y_v2",0).apply()
                     calibrating=true;calibrationMode=1;drawCalibration()
@@ -338,13 +349,19 @@ class NexoraActivity : Activity() {
                 button("Wake Signature","Sample locked capsule"){requestIsland("demo_lock")}
                 button("Unlock Signature","Sample confirmation"){requestIsland("demo_unlock")}
                 button("Music preview","Real size calibration with sample artwork"){calibrating=true;calibrationMode=2;drawCalibration()}
-                button("Rapid event sequence","Six local events, 450 ms apart; stresses interrupted transitions"){
+                button("Rapid event sequence","Eight local events, 450 ms apart; stresses interrupted transitions"){
                     if(!CutoutAccessibilityService.bound.value || !prefs.getBoolean("enabled",false)){Toast.makeText(this,"Enable the Dev Island first",Toast.LENGTH_SHORT).show();return@button}
                     sequenceJob?.cancel()
                     sequenceJob=mainScope.launch{
                         for(event in listOf("demo_message","demo_fast","demo_wifi","demo_bluetooth","demo_slow","demo_charge","demo_super","demo_unlock")){
                             requestIsland(event);delay(450)
                         }
+                    }
+                }
+                button("Showcase sequence","Four charging tiers and unlock • full animation time"){
+                    if(!CutoutAccessibilityService.bound.value || !prefs.getBoolean("enabled",false)){Toast.makeText(this,"Enable the Dev Island first",Toast.LENGTH_SHORT).show();return@button}
+                    sequenceJob?.cancel();sequenceJob=mainScope.launch{
+                        for(event in listOf("demo_slow","demo_charge","demo_fast","demo_super","demo_unlock")){requestIsland(event);delay(6800)}
                     }
                 }
                 button("Stop sequence","Cancel remaining simulated events"){sequenceJob?.cancel();requestIsland("demo_clear")}
@@ -362,6 +379,8 @@ class NexoraActivity : Activity() {
                 add(label("Shizuku: "+ShizukuState.status.value.name+" • Android API "+android.os.Build.VERSION.SDK_INT,13f,muted),4)
                 add(label("Display refresh mode: "+resources.displayMetrics.densityDpi+" dpi • "+(if(android.os.Build.VERSION.SDK_INT>=30)display?.refreshRate else windowManager.defaultDisplay.refreshRate)+" Hz (not measured Island FPS)",13f,muted),4)
                 add(label("Active notifications: "+NotificationInboxBus.items.value.size,13f,muted),12)
+                val memory=android.os.Debug.MemoryInfo();android.os.Debug.getMemoryInfo(memory)
+                add(label("Process PSS: "+(memory.totalPss/1024)+" MiB • snapshot, not GPU memory",13f,muted),8)
                 button("Refresh diagnostics","Read current local state"){drawPage()}
             }
             "activities"->{
