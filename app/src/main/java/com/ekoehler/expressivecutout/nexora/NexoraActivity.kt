@@ -296,7 +296,7 @@ class NexoraActivity : Activity() {
                 button("Motion","Animation accessibility and haptics"){go("motion")}
                 button("Live activities","Music, timers, charging and connections"){go("activities")}
                 button("Notifications","Privacy, queue and inbox"){go("notifications")}
-                button("Notch Touch","Camera gestures and sensitivity"){go("notch")}
+                button("Notification Inbox","Single tap on the camera"){go("notch")}
                 button("Gestures","Island touch preferences"){go("gestures")}
                 if(isDev){heading("DEVELOPER");button("Motion Lab","Simulated events, real test notifications and diagnostics"){go("lab")}}
                 heading("SYSTEM")
@@ -388,7 +388,7 @@ class NexoraActivity : Activity() {
                 toggle("Smart queue","Optional • let new events wait rather than interrupt each other","queue_events",false)
                 toggle("Live progress","Downloads and uploads stay visible while Android reports progress","live_progress")
                 toggle("Notification inbox","View active notifications in a paged island list","inbox")
-                button("Notch Touch","Set up camera gestures and shortcuts"){go("notch")}
+                button("Camera inbox","Single tap to view notifications"){go("notch")}
                 button("Open inbox","Browse active notifications on the real island"){requestIsland("inbox")}
                 button("Notification list","View and open active notifications in NEXORA"){go("inbox")}
                 button("Apps & exclusions","Choose which apps may appear"){go("apps")}
@@ -445,37 +445,18 @@ class NexoraActivity : Activity() {
                 button("Refresh","Read the current notification snapshot"){drawPage()}
             }
             "notch"->{
-                pageFrame("Notch Touch","An invisible touch target around your camera. No separate app or root needed.")
-                toggle("Camera gestures","Active while your phone is unlocked and awake","notch_inbox")
-                heading("GESTURES")
-                NotchGesture.entries.forEach{gesture->
-                    val action=NotchAction.read(prefs.getString(gesture.key,null),gesture.defaultAction)
-                    button(gesture.title,action.label){
-                        val values=NotchAction.entries
-                        android.app.AlertDialog.Builder(this).setTitle(gesture.title)
-                            .setSingleChoiceItems(values.map{it.label}.toTypedArray(),values.indexOf(action)){dialog,which->
-                                prefs.edit().putString(gesture.key,values[which].name).apply()
-                                dialog.dismiss();drawPage()
-                            }.setNegativeButton("Cancel",null).show()
-                    }
-                }
-                heading("TOUCH AREA")
-                adjustment("Extra touch padding","notch_padding",0,12,6," dp")
-                adjustment("Swipe distance","notch_swipe_distance",18,56,28," dp")
-                add(label("Double tap is off by default for instant single taps. If enabled, a single tap waits briefly for the second tap. Incoming calls, AOD and the lock screen take priority.",13f,muted))
-                button("Reset camera gestures","Restore default actions and sensitivity"){
-                    val edit=prefs.edit();NotchGesture.entries.forEach{edit.remove(it.key)}
-                    edit.remove("notch_padding").remove("notch_swipe_distance").apply();drawPage()
-                }
+                pageFrame("Notification Inbox","Tap your camera opening once to view active notifications in the island.")
+                toggle("Tap camera to open inbox","Available while the phone is awake and unlocked","notch_inbox")
+                add(label("Swipe a temporary island notification away without clearing it from Android. Tap the camera again to revisit active notifications. No additional camera gestures.",14f,muted))
             }
             "gestures"->{
                 pageFrame("Gestures & controls","Stay in control without opening another app.")
-                button("Notch Touch","Configure the camera opening separately"){go("notch")}
+                button("Camera inbox","Single tap to view notifications"){go("notch")}
                 toggle("Swipe horizontally","Switch between live activities","swipe_switch")
                 toggle("Swipe up","Dismiss the temporary island view","swipe_close")
                 toggle("Swipe down","Open Android notifications from the compact island","swipe_shade")
                 heading("TOUCH")
-                add(label("Tap the camera opening for the notification inbox. Swipe between pages; tap a message to open it. Tap outside the camera area to expand a live activity. Long press opens Android quick settings by default. Incoming calls override navigation gestures until answered or declined.",14f,muted))
+                add(label("Tap the camera opening for the notification inbox. Swipe between pages; tap a message to open it. Tap outside the camera area to expand a live activity. Incoming calls override navigation gestures until answered or declined.",14f,muted))
             }
             "access"->{
                 pageFrame("Setup & Shizuku","Grant the permissions needed for NEXORA.")
