@@ -50,75 +50,29 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private var notchStartY=0f
     private var notchStartTime=0L
     private var notchTravel=0f
-    private var lastTapTime=0L
-    private var lastTapX=0f
-    private var lastTapY=0f
-    private var queuedTap:Runnable?=null
-    private var secondTap=false
-    private fun notchAction(gesture:NotchGesture)=NotchAction.read(prefs.getString(gesture.key,null),gesture.defaultAction)
     private fun notchAllowed()=enabled("enabled") && enabled("notch_inbox") && displayAwake() && !keyguard.isKeyguardLocked && !ringing() && NexoraCalibration.mode.value==0 && service.resources.configuration.orientation==android.content.res.Configuration.ORIENTATION_PORTRAIT
-    private fun cancelNotchGesture(){
-        queuedTap?.let{handler.removeCallbacks(it)}
-        queuedTap=null;lastTapTime=0L;notchOwner=null;secondTap=false
-    }
-    private fun dispatchNotch(gesture:NotchGesture){
-        if(!notchAllowed())return
-        when(notchAction(gesture)){
-            NotchAction.NONE->Unit
-            NotchAction.INBOX->if(inboxOpen)closeInbox() else openInbox()
-            NotchAction.SHADE->service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS)
-            NotchAction.QUICK_SETTINGS->service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS)
-            NotchAction.NEXT_ACTIVITY->swipe(1,true)
-            NotchAction.PREVIOUS_ACTIVITY->swipe(-1,true)
-            NotchAction.PLAY_PAUSE->runCatching{NowPlayingBus.state.value?.transport?.playPause()}
-            NotchAction.NEXT_TRACK->runCatching{NowPlayingBus.state.value?.transport?.next()}
-            NotchAction.PREVIOUS_TRACK->runCatching{NowPlayingBus.state.value?.transport?.previous()}
-            NotchAction.SETTINGS->runCatching{service.startActivity(android.content.Intent(service,NexoraActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))}
-            NotchAction.DISMISS->{inboxOpen=false;browsing=false;expanded=false;flash=null;pending.clear();autoCollapseAt=0L;autoFocus=null;selectedId=null;render()}
-        }
-    }
+    private fun cancelNotchGesture(){notchOwner=null}
     private fun notchTouch(owner:View,e:MotionEvent):Boolean{
         if(!notchAllowed()){cancelNotchGesture();return false}
         when(e.actionMasked){
             MotionEvent.ACTION_DOWN->{
-                notchOwner=owner;notchStartX=e.rawX;notchStartY=e.rawY;notchStartTime=SystemClock.uptimeMillis();notchTravel=0f
-                secondTap=NexoraPolicy.isDoubleTap(notchStartTime-lastTapTime,ViewConfiguration.getDoubleTapTimeout().toLong(),hypot(e.rawX-lastTapX,e.rawY-lastTapY),dp(24f),queuedTap!=null)
-                if(secondTap){queuedTap?.let{handler.removeCallbacks(it)};queuedTap=null}
-                return true
+                notchOwner=owner;notchStartX=e.rawX;notchStartY=e.rawY
+                notchStartTime=SystemClock.uptimeMillis();notchTravel=0f
             }
-            MotionEvent.ACTION_MOVE->{if(notchOwner===owner)notchTravel=max(notchTravel,hypot(e.rawX-notchStartX,e.rawY-notchStartY));return true}
-            MotionEvent.ACTION_POINTER_DOWN,MotionEvent.ACTION_CANCEL->{cancelNotchGesture();return true}
+            MotionEvent.ACTION_MOVE->if(notchOwner===owner)notchTravel=max(notchTravel,hypot(e.rawX-notchStartX,e.rawY-notchStartY))
+            MotionEvent.ACTION_POINTER_DOWN,MotionEvent.ACTION_CANCEL->cancelNotchGesture()
             MotionEvent.ACTION_UP->{
                 if(notchOwner!==owner)return true
-                notchOwner=null
-                val dx=e.rawX-notchStartX;val dy=e.rawY-notchStartY
-                val slop=dp(prefs.getInt("notch_swipe_distance",28).coerceIn(18,56).toFloat())
-                val elapsed=SystemClock.uptimeMillis()-notchStartTime
-                val code=NexoraPolicy.gesture(dx,dy,slop,elapsed)
-                val tapSlop=min(dp(12f),slop*.55f)
-                if(code==0 && max(notchTravel,hypot(dx,dy))<=tapSlop){
+                cancelNotchGesture()
+                val distance=max(notchTravel,hypot(e.rawX-notchStartX,e.rawY-notchStartY))
+                if(distance<=dp(12f) && SystemClock.uptimeMillis()-notchStartTime<ViewConfiguration.getLongPressTimeout()){
                     if(enabled("haptics"))owner.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                     owner.performClick()
-                    if(notchAction(NotchGesture.DOUBLE)==NotchAction.NONE){cancelNotchGesture();dispatchNotch(NotchGesture.TAP);return true}
-                    val now=SystemClock.uptimeMillis()
-                    val interval=ViewConfiguration.getDoubleTapTimeout().toLong()
-                    val double=secondTap || NexoraPolicy.isDoubleTap(now-lastTapTime,interval,hypot(e.rawX-lastTapX,e.rawY-lastTapY),dp(24f),queuedTap!=null)
-                    if(double){cancelNotchGesture();dispatchNotch(NotchGesture.DOUBLE)}
-                    else{
-                        queuedTap?.let{handler.removeCallbacks(it)}
-                        lastTapTime=now;lastTapX=e.rawX;lastTapY=e.rawY
-                        val job=Runnable{queuedTap=null;lastTapTime=0L;dispatchNotch(NotchGesture.TAP)}
-                        queuedTap=job;handler.postDelayed(job,interval)
-                    }
-                } else {
-                    cancelNotchGesture()
-                    val g=when(code){1->NotchGesture.LEFT;-1->NotchGesture.RIGHT;2->NotchGesture.UP;5->NotchGesture.DOWN;4->if(notchTravel<=tapSlop)NotchGesture.HOLD else null;else->null}
-                    if(g!=null){if(enabled("haptics"))owner.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);dispatchNotch(g)}
+                    if(inboxOpen)closeInbox() else openInbox()
                 }
-                return true
             }
-            else->return true
         }
+        return true
     }
     private var inboxRows:List<InboxNotification> = emptyList()
     private fun eligibleInbox()=if(enabled("inbox") && enabled("notifications")) NotificationInboxBus.items.value.filter{it.packageName !in mutedApps && (enabled("silent_notifications") || !it.silent)} else emptyList()
@@ -144,18 +98,10 @@ class NexoraOverlay(private val service: AccessibilityService) {
         // A small transparent target even when idle if a configured shortcut is useful.
         // Never creates a screen-wide overlay or draws on AOD.
         if(panel!=null || !displayVisible || !notchAllowed()){removeNotch();return}
-        val useful=NotchGesture.entries.any{g->
-            when(notchAction(g)){
-                NotchAction.NONE,NotchAction.DISMISS,NotchAction.NEXT_ACTIVITY,NotchAction.PREVIOUS_ACTIVITY->false
-                NotchAction.INBOX->eligibleInbox().isNotEmpty()
-                NotchAction.PLAY_PAUSE,NotchAction.NEXT_TRACK,NotchAction.PREVIOUS_TRACK->NowPlayingBus.state.value!=null
-                else->true
-            }
-        }
-        if(!useful){removeNotch();return}
+        if(eligibleInbox().isEmpty()){removeNotch();return}
         val bounds=CutoutMetrics.displayCutoutBoundsPx(service) ?: run{removeNotch();return}
         if(bounds.centerY()>dp(64f)){removeNotch();return}
-        val pad=dp(prefs.getInt("notch_padding",6).coerceIn(0,12).toFloat())
+        val pad=dp(6f)
         val width=max(dp(24f),bounds.width()+2*pad).roundToInt()
         val height=max(dp(22f),bounds.height()+2*pad).roundToInt()
         val x=(bounds.centerX()-width/2f).roundToInt().coerceAtLeast(0)
@@ -166,11 +112,11 @@ class NexoraOverlay(private val service: AccessibilityService) {
         val target=object:View(service){
             override fun performClick():Boolean{super.performClick();return true}
             override fun onTouchEvent(event:MotionEvent)=notchTouch(this,event)
-        }.apply{isClickable=true;contentDescription="NEXORA camera shortcuts"}
+        }.apply{isClickable=true;contentDescription="NEXORA notification inbox"}
         val lp=WindowManager.LayoutParams(width,height,WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,PixelFormat.TRANSLUCENT)
         lp.gravity=Gravity.TOP or Gravity.LEFT;lp.x=x;lp.y=y
         lp.layoutInDisplayCutoutMode=if(Build.VERSION.SDK_INT>=30)WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-        lp.title="NEXORA camera shortcuts"
+        lp.title="NEXORA notification inbox"
         runCatching{wm.addView(target,lp);notchTarget=target;notchBounds=area}
     }
     private var mutedApps:Set<String> = emptySet()
@@ -1478,7 +1424,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             if(keyguard.isKeyguardLocked || !displayAwake())return false
             val localX=event.x-drawX;val localY=event.y-drawY
             if(event.actionMasked==MotionEvent.ACTION_DOWN){
-                val pad=dp(prefs.getInt("notch_padding",6).coerceIn(0,12).toFloat())
+                val pad=dp(6f)
                 touchActive=false
                 notchRoute=notchAllowed() && geometry?.isRunning!=true && localY in 0f..topHeight &&
                     abs(localX-cameraX)<=cameraRadius+pad
