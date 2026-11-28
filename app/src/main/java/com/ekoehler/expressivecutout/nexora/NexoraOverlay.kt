@@ -450,8 +450,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
     }
     private fun activate(card:Card, now:Long) {
         inboxOpen=false;flash=card
-        autoCollapseAt=now+expandedMs()
-        flashUntil=autoCollapseAt+compactMs()
+        val transientSignature=card.kind=="unlock" || card.kind=="connect" || card.kind=="system" || card.kind=="lock"
+        autoCollapseAt=now+if(card.kind=="unlock")1800L else expandedMs()
+        flashUntil=autoCollapseAt+if(transientSignature)0L else compactMs()
         autoFocus=card.kind
         selection=0
         browsing=false
@@ -555,8 +556,10 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 // X and width share a progress curve, keeping the capsule center stationary
                 // during collapse. Independent velocities previously caused lateral drift.
                 val horizontal=if(abs(dw)>.01f)sw else sx
-                val px=NexoraPolicy.motionPosition(t,horizontal);val py=NexoraPolicy.motionPosition(t,sy)
-                val ph=NexoraPolicy.motionPosition(t,sh)
+                val closing=dismiss || h<fromH-dp(10f)
+                val px=if(closing)NexoraPolicy.smoothstep(t)else NexoraPolicy.motionPosition(t,horizontal)
+                val py=if(closing)px else NexoraPolicy.motionPosition(t,sy)
+                val ph=if(closing)px else NexoraPolicy.motionPosition(t,sh)
                 vx=dx*NexoraPolicy.motionVelocity(t,horizontal)/ms;vy=dy*NexoraPolicy.motionVelocity(t,sy)/ms
                 vw=dw*NexoraPolicy.motionVelocity(t,horizontal)/ms;vh=dh*NexoraPolicy.motionVelocity(t,sh)/ms
                 place(v,fromX+dx*px,fromY+dy*py,fromW+dw*px,fromH+dh*ph)
@@ -836,6 +839,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
         private var downExpanded=false
         private var touchActive=false
         private var notchRoute=false
+        private val inboxScroller=android.widget.OverScroller(service)
+        private var inboxVelocity:android.view.VelocityTracker?=null
+        private var inboxListTouch=false
         private var inboxDrag=false
         private var inboxStartScroll=0f
         private var inboxDownKey:String?=null
@@ -848,6 +854,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         var count = 1; var index = 0; var open = false; var preview = false
         init { isClickable = true; contentDescription = "NEXORA live activity" }
         fun enter() {
+            inboxScroller.forceFinished(true);inboxVelocity?.recycle();inboxVelocity=null
             began = SystemClock.uptimeMillis()
             rateAt=0L
             invalidate()
@@ -1267,7 +1274,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             if(a<=0f)return
             if(a<.999f)canvas.saveLayerAlpha(0f,topHeight,w,h,(a*255).toInt())else canvas.save()
             val y=topHeight;val l=dp(14f);val r=w-dp(14f)
-            text(canvas,"Inbox",l+dp(4f),y+dp(21f),17f,Color.WHITE,w-dp(105f),true)
+            text(canvas,"Notifications",l+dp(4f),y+dp(21f),16f,Color.WHITE,w-dp(105f),true)
             color(0xFF252032.toInt());canvas.drawRoundRect(r-dp(66f),y+dp(4f),r-dp(3f),y+dp(25f),dp(10f),dp(10f),paint)
             text(canvas,"${inboxRows.size} active",r-dp(60f),y+dp(18f),10f,VIOLET,dp(54f),true)
             val listTop=y+dp(32f);val listBottom=min(y+dp(212f),h-dp(9f))
@@ -1277,7 +1284,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 for(row in first until min(first+5,inboxRows.size)){
                     val item=inboxRows[row]
                     val yy=listTop+dp(60f)*row-inboxScroll
-                    color(0xFF13151C.toInt());canvas.drawRoundRect(l,yy,r-dp(5f),yy+dp(54f),dp(14f),dp(14f),paint)
+                    color(if(inboxDownKey==item.key && touchActive && !inboxDrag)0xFF252438.toInt() else 0xFF14161E.toInt());canvas.drawRoundRect(l,yy,r-dp(5f),yy+dp(54f),dp(14f),dp(14f),paint)
+                    color(0xFF242737.toInt());canvas.drawRoundRect(l+dp(6f),yy+dp(10f),l+dp(40f),yy+dp(44f),dp(10f),dp(10f),paint)
                     val icon=appIcon(item.packageName);val size=dp(28f);val ix=l+dp(9f);val iy=yy+dp(13f)
                     if(icon!=null){icon.setBounds(ix.toInt(),iy.toInt(),(ix+size).toInt(),(iy+size).toInt());icon.draw(canvas)}
                     val tx=l+dp(46f);val available=r-tx-dp(22f)
@@ -1325,7 +1333,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
             if(reveal<.999f)canvas.saveLayerAlpha(0f,0f,w,h,((1f-(1f-reveal)*(1f-reveal))*255).toInt()) else canvas.save()
             try {
             // Reference has a pure black silhouette without a visible outline.
-            if(card.kind=="inbox") {drawInbox(canvas,w,h,((h-topHeight)/dp(224f)).coerceIn(0f,1f));if(!reducedMotion && age<.14f)postInvalidateOnAnimation();return}
+            if(card.kind=="inbox") {
+                if(inboxScroller.computeScrollOffset()){inboxScroll=inboxScroller.currY.toFloat().coerceIn(0f,inboxMaxScroll());postInvalidateOnAnimation()}
+                drawInbox(canvas,w,h,((h-topHeight)/dp(224f)).coerceIn(0f,1f));if(!reducedMotion && age<.14f)postInvalidateOnAnimation();return}
             if(card.kind=="music") {
                 if(w>dp(105f)) musicLayout(canvas,w,h,expansion,age)
                 if(!reducedMotion && (age<1.3f || preview || NowPlayingBus.state.value?.isPlaying==true))postInvalidateOnAnimation()
@@ -1472,32 +1482,43 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     touchActive=geometry?.isRunning!=true
                     downX=event.rawX;downY=event.rawY;downTime=SystemClock.uptimeMillis()
                     downCard=card.identity();downExpanded=open;maxTravel=0f
+                    inboxScroller.forceFinished(true);inboxVelocity?.recycle();inboxVelocity=null
                     inboxDrag=false;inboxStartScroll=inboxScroll
+                    inboxListTouch=card.kind=="inbox" && localY>=topHeight+dp(32f) && localY<topHeight+dp(212f)
+                    if(inboxListTouch){inboxVelocity=android.view.VelocityTracker.obtain();inboxVelocity?.addMovement(event)}
                     inboxDownKey=if(card.kind=="inbox" && localY>=topHeight+dp(32f) && localY<topHeight+dp(212f))inboxRows.getOrNull(((localY-topHeight-dp(32f)+inboxScroll)/dp(60f)).toInt())?.key else null
-                    if(touchActive && enabled("haptics"))performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                    if(touchActive && card.kind!="inbox" && enabled("haptics"))performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                    if(card.kind=="inbox")invalidate()
                     return true
                 }
                 MotionEvent.ACTION_MOVE->{
                     maxTravel=max(maxTravel,hypot(event.rawX-downX,event.rawY-downY))
                     if(downCard!=card.identity() || downExpanded!=open || geometry?.isRunning==true){touchActive=false}
-                    if(touchActive && card.kind=="inbox" && inboxDownKey!=null){
+                    if(touchActive && card.kind=="inbox" && inboxListTouch){
+                        inboxVelocity?.addMovement(event)
                         val dy=event.rawY-downY
                         if(abs(dy)>ViewConfiguration.get(service).scaledTouchSlop)inboxDrag=true
                         if(inboxDrag){inboxScroll=(inboxStartScroll-dy).coerceIn(0f,inboxMaxScroll());invalidate()}
                     }
                     return true
                 }
-                MotionEvent.ACTION_POINTER_DOWN->{touchActive=false;return true}
+                MotionEvent.ACTION_POINTER_DOWN->{touchActive=false;inboxVelocity?.recycle();inboxVelocity=null;return true}
                 MotionEvent.ACTION_UP->{
                     val valid=touchActive && downCard==card.identity() && downExpanded==open && geometry?.isRunning!=true
                     touchActive=false
-                    if(!valid)return true
+                    if(!valid){inboxVelocity?.recycle();inboxVelocity=null;return true}
                     if(card.kind=="inbox"){
+                        if(inboxDrag){
+                            inboxVelocity?.addMovement(event);inboxVelocity?.computeCurrentVelocity(1000,ViewConfiguration.get(service).scaledMaximumFlingVelocity.toFloat())
+                            val speed=-(inboxVelocity?.yVelocity ?: 0f)
+                            if(abs(speed)>ViewConfiguration.get(service).scaledMinimumFlingVelocity){inboxScroller.fling(0,inboxScroll.toInt(),0,speed.toInt(),0,0,0,inboxMaxScroll().toInt());postInvalidateOnAnimation()}
+                        }
+                        inboxVelocity?.recycle();inboxVelocity=null
                         if(!inboxDrag && maxTravel<ViewConfiguration.get(service).scaledTouchSlop && SystemClock.uptimeMillis()-downTime<ViewConfiguration.getLongPressTimeout()){
                             val key=if(localY>=topHeight+dp(32f) && localY<topHeight+dp(212f))inboxRows.getOrNull(((localY-topHeight-dp(32f)+inboxScroll)/dp(60f)).toInt())?.key else null
                             if(key==inboxDownKey){performClick();tap(localX,localY)}
                         }
-                        inboxDrag=false;return true
+                        inboxDrag=false;invalidate();return true
                     }
                     val dx=event.rawX-downX;val dy=event.rawY-downY
                     val slop=max(dp(32f),ViewConfiguration.get(service).scaledTouchSlop*2f)
@@ -1513,7 +1534,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     }
                     return true
                 }
-                MotionEvent.ACTION_CANCEL->{touchActive=false;return true}
+                MotionEvent.ACTION_CANCEL->{touchActive=false;inboxVelocity?.recycle();inboxVelocity=null;return true}
                 else->return true
             }
         }
