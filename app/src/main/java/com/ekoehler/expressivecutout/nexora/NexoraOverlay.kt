@@ -658,14 +658,14 @@ class NexoraOverlay(private val service: AccessibilityService) {
         if(changed && autoCollapseAt==0L && !ringing() && !browsing && !inboxOpen && flash==null)expanded=false
         current = next
         selectedId=next.identity()
-        val v = panel ?: IslandView().also { panel = it }
-        val metrics = if (Build.VERSION.SDK_INT >= 30) wm.currentWindowMetrics else null
-        val screenWidth = metrics?.bounds?.width() ?: service.resources.displayMetrics.widthPixels
+        val screenWidth = if (Build.VERSION.SDK_INT >= 30) wm.currentWindowMetrics.bounds.width()
+            else service.resources.displayMetrics.widthPixels
         val cutout = CutoutMetrics.displayCutoutBoundsPx(service)?.takeIf {
             it.centerY() < dp(64f) && it.centerX() >= screenWidth/4f && it.centerX() <= screenWidth*3/4f
         }
         // Unsupported camera geometry must not produce an arbitrary pill over an app.
         if(cutout==null){removeNotch();remove();return}
+        val v = panel ?: IslandView().also { panel = it }
         val cameraX = cutout.centerX().roundToInt()
         val preview = NexoraCalibration.mode.value.takeUnless { keyguard.isKeyguardLocked || ringing() } ?: 0
         val isExpanded = if (preview != 0) preview == 2 else expanded && !(next.kind=="lock" && keyguard.isKeyguardLocked)

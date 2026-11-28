@@ -67,6 +67,13 @@ android {
         jvmTarget = "17"
     }
 
+    lint {
+        // Existing partial translations use Android's default English resources.
+        // Keep this issue visible, without conflating translation coverage with runtime safety.
+        warning += "MissingTranslation"
+        abortOnError = true
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true

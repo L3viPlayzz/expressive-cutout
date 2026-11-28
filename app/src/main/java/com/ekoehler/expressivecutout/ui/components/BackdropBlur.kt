@@ -27,9 +27,7 @@ fun Modifier.backdropBlur(color: Color, radius: Dp): Modifier {
     return drawWithCache {
         if (blurNode != null && radius.toPx() != blurRadiusPx) {
             blurRadiusPx = radius.toPx()
-            blurNode.setBackdropRenderEffect(
-                RenderEffect.createBlurEffect(blurRadiusPx, blurRadiusPx, Shader.TileMode.CLAMP),
-            )
+            setSupportedBackdropEffect(blurNode, blurRadiusPx)
         }
 
         onDrawBehind {
@@ -48,7 +46,17 @@ fun Modifier.backdropBlur(color: Color, radius: Dp): Modifier {
 }
 
 /** Whether this device's framework has [RenderNode.setBackdropRenderEffect] (API 37.2+). */
+@android.annotation.SuppressLint("InlinedApi") // Full SDK constant is only read after the major SDK guard.
 internal fun supportsBackdropBlur(): Boolean =
     // SDK_INT_FULL only exists from API 36, so the major-level check must short-circuit first
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA &&
         Build.VERSION.SDK_INT_FULL >= Build.VERSION_CODES_FULL.CINNAMON_BUN_2
+
+/** Lint cannot express the fractional SDK 37.2 guard through RequiresApi(Int).
+ * The exact full SDK is checked here, immediately before both framework calls.
+ */
+@android.annotation.SuppressLint("NewApi")
+private fun setSupportedBackdropEffect(node: RenderNode, radius: Float) {
+    if (!supportsBackdropBlur()) return
+    node.setBackdropRenderEffect(RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP))
+}

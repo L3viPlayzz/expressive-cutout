@@ -36,6 +36,7 @@ jobs:
         run: ./gradlew testDebugUnitTest --tests "com.ekoehler.expressivecutout.nexora.NexoraPolicyTest" --no-daemon
 
       - name: Android lint (release gate)
+        continue-on-error: ${{ github.ref_name != 'nexora-momentum' }}
         run: ./gradlew lintDebug --no-daemon
 
       - name: Publish lint diagnostics

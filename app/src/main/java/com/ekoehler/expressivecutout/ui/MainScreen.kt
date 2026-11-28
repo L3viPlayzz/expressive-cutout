@@ -175,9 +175,9 @@ fun MainScreen(viewModel: AppViewModel = viewModel()) {
         }
     }
 
-    Scaffold { _ ->
-        val navBarBottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val statusBarTopInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    Scaffold { scaffoldPadding ->
+        val navBarBottomInset = maxOf(scaffoldPadding.calculateBottomPadding(), WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
+        val statusBarTopInset = maxOf(scaffoldPadding.calculateTopPadding(), WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
         val topScrimHeight = statusBarTopInset + 40.dp
 
         val contentPadding = PaddingValues(

@@ -199,42 +199,33 @@ class SystemEventMonitor(
                         )
                     }
                 }
-                BluetoothDevice.ACTION_ACL_CONNECTED -> {
-                    val device = getBluetoothDevice(intent)
-                    // Audio headsets/earbuds are handled separately with rich metadata by AudioDeviceCallback
-                    val isAudio = runCatching {
-                        device?.bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.AUDIO_VIDEO
-                    }.getOrDefault(false)
-                    if (!isAudio) {
-                        val name = runCatching { device?.name }.getOrNull()?.takeIf { it.isNotBlank() }
-                            ?: "Bluetooth accessory"
-                        emit(
-                            SystemEventPayload(
-                                type = SystemEventType.BLUETOOTH_CONNECTED,
-                                title = context.getString(R.string.event_bluetooth_connected),
-                                subtitle = name,
-                                actionIntentAction = Settings.ACTION_BLUETOOTH_SETTINGS,
-                            ),
-                        )
-                    }
-                }
+                BluetoothDevice.ACTION_ACL_CONNECTED,
                 BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                    val connected = intent.action == BluetoothDevice.ACTION_ACL_CONNECTED
                     val device = getBluetoothDevice(intent)
-                    val isAudio = runCatching {
-                        device?.bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.AUDIO_VIDEO
-                    }.getOrDefault(false)
-                    if (!isAudio) {
-                        val name = runCatching { device?.name }.getOrNull()?.takeIf { it.isNotBlank() }
-                            ?: "Device disconnected"
-                        emit(
-                            SystemEventPayload(
-                                type = SystemEventType.BLUETOOTH_DISCONNECTED,
-                                title = context.getString(R.string.event_bluetooth_disconnected),
-                                subtitle = name,
-                                actionIntentAction = Settings.ACTION_BLUETOOTH_SETTINGS,
-                            ),
-                        )
+                    var isAudio = false
+                    var name: String? = null
+                    // Nearby devices is optional. Permission can also be revoked between
+                    // the check and the framework call, so handle that race explicitly.
+                    if (Build.VERSION.SDK_INT < 31 ||
+                        context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) ==
+                        android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        try {
+                            isAudio = device?.bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.AUDIO_VIDEO
+                            name = device?.name?.takeIf { it.isNotBlank() }
+                        } catch (_: SecurityException) {
+                            name = null
+                        }
                     }
+                    // Audio devices are handled by AudioDeviceCallback.
+                    if (!isAudio) emit(
+                        SystemEventPayload(
+                            type = if (connected) SystemEventType.BLUETOOTH_CONNECTED else SystemEventType.BLUETOOTH_DISCONNECTED,
+                            title = context.getString(if (connected) R.string.event_bluetooth_connected else R.string.event_bluetooth_disconnected),
+                            subtitle = name ?: if (connected) "Bluetooth accessory" else "Device disconnected",
+                            actionIntentAction = Settings.ACTION_BLUETOOTH_SETTINGS,
+                        ),
+                    )
                 }
                 ACTION_WIFI_AP_STATE_CHANGED -> {
                     val state = intent.getIntExtra(EXTRA_WIFI_AP_STATE, 0)

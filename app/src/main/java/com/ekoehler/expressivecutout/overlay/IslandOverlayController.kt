@@ -2677,10 +2677,16 @@ class IslandOverlayController(private val context: Context) {
         val packageName = OnCallBus.state.value?.packageName
         if (packageName != null && packageName != context.packageName) {
             val telecom = context.getSystemService<TelecomManager>()
-            if (telecom != null) {
-                runCatching { telecom.showInCallScreen(false) }
-                    .onSuccess { return }
-                    .onFailure { Log.w(TAG, "Failed to show the in-call screen", it) }
+            if (telecom != null && context.checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                try {
+                    telecom.showInCallScreen(false)
+                    return
+                } catch (e: SecurityException) {
+                    Log.w(TAG, "In-call screen permission unavailable", e)
+                } catch (e: RuntimeException) {
+                    Log.w(TAG, "Failed to show the in-call screen", e)
+                }
             }
         }
         val intent = currentEvent.value?.contentIntent
@@ -3103,10 +3109,9 @@ class IslandOverlayController(private val context: Context) {
         ).apply {
             gravity = computeWindowGravity()
             y = computeWindowOffsetY()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                layoutInDisplayCutoutMode =
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-            }
+            layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= 30)
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
     }
 
