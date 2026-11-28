@@ -329,10 +329,10 @@ class NexoraActivity : Activity() {
                 add(label("Use only one NEXORA overlay at a time. Disable the consumer accessibility service while testing this edition.",13f,muted),14)
                 heading("SIGNATURE MOTION")
                 button("Notification Morph","Local sample"){requestIsland("demo_message")}
-                button("Charging • normal","84% sample"){requestIsland("demo_charge")}
-                button("Charging • fast","Faster current"){requestIsland("demo_fast")}
-                button("Charging • superfast","Twin current pulse"){requestIsland("demo_super")}
-                button("Charging • slow","Softer pulse"){requestIsland("demo_slow")}
+                button("Charging • normal","Two orbital pulses • 84% sample"){requestIsland("demo_charge")}
+                button("Charging • fast","Three orbital pulses • simulated"){requestIsland("demo_fast")}
+                button("Charging • superfast","Four orbital pulses • simulated, no charger needed"){requestIsland("demo_super")}
+                button("Charging • slow","One soft orbital pulse • simulated"){requestIsland("demo_slow")}
                 button("Wi-Fi connection","Sample network: NEXORA Lab"){requestIsland("demo_wifi")}
                 button("Bluetooth connection","Sample accessory: NEXORA Buds"){requestIsland("demo_bluetooth")}
                 button("Wake Signature","Sample locked capsule"){requestIsland("demo_lock")}
@@ -342,7 +342,7 @@ class NexoraActivity : Activity() {
                     if(!CutoutAccessibilityService.bound.value || !prefs.getBoolean("enabled",false)){Toast.makeText(this,"Enable the Dev Island first",Toast.LENGTH_SHORT).show();return@button}
                     sequenceJob?.cancel()
                     sequenceJob=mainScope.launch{
-                        for(event in listOf("demo_message","demo_fast","demo_wifi","demo_bluetooth","demo_slow","demo_unlock")){
+                        for(event in listOf("demo_message","demo_fast","demo_wifi","demo_bluetooth","demo_slow","demo_charge","demo_super","demo_unlock")){
                             requestIsland(event);delay(450)
                         }
                     }
