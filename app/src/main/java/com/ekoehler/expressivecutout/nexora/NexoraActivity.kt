@@ -542,10 +542,19 @@ class NexoraActivity : Activity() {
                     }
                 }
             }
+            "licenses"->{
+                pageFrame("Open-source licenses","Copyright and source code")
+                add(label("NEXORA includes modified code from Expressive Cutout by Evan Koehler and contributors. NEXORA modifications by L3viPlayzz. Distributed under GNU General Public License v3.0, without warranty.",14f,muted))
+                button("NEXORA source code","Corresponding source and full GPL-3.0 license"){startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://github.com/L3viPlayzz/expressive-cutout/tree/nexora-momentum")))}
+                button("Original project","Expressive Cutout • upstream source"){startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://github.com/EvanKoe/expressive-cutout")))}
+                button("Full license","GNU General Public License v3.0"){startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://github.com/L3viPlayzz/expressive-cutout/blob/nexora-momentum/LICENSE")))}
+                button("Back","About NEXORA"){go("about")}
+            }
             "about"->{
                 pageFrame(if(isDev)"About NEXORA Dev" else "About NEXORA",BuildConfig.VERSION_NAME+" • Beyond the Island")
                 add(label("Independent Canvas interface, powered by Android media sessions, notification access and accessibility. No network permission.",15f,muted))
-                add(label("GPL-3.0 • Modified from EvanKoe/expressive-cutout. No warranty. Source: github.com/L3viPlayzz/expressive-cutout/tree/nexora-momentum",13f,muted))
+                add(label("NEXORA • Developed by L3viPlayzz",13f,muted))
+                button("Open-source licenses","GPL-3.0 • Copyright, credits and source code"){go("licenses")}
                 button("Reset NEXORA preferences","Restore renderer settings; permissions are not removed"){
                     android.app.AlertDialog.Builder(this).setTitle("Reset NEXORA?").setMessage("This restores the new renderer settings.").setNegativeButton("Cancel",null).setPositiveButton("Reset"){_,_->prefs.edit().clear().putBoolean("enabled",!isDev).apply();go("home")}.show()
                 }
