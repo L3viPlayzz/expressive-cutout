@@ -5,6 +5,9 @@ import org.junit.Test
 
 class NexoraPolicyTest {
     @Test fun nativeMotion(){
+        assertEquals(0f,NexoraPolicy.pulse(0f,.1f,.9f),.0001f)
+        assertEquals(1f,NexoraPolicy.pulse(.5f,.1f,.9f),.0001f)
+        assertEquals(0f,NexoraPolicy.pulse(1f,.1f,.9f),.0001f)
         assertEquals(.85f,NexoraPolicy.entrySlope(100f,0f,325),.0001f)
         assertEquals(0f,NexoraPolicy.breath(0f,1.8f),.0001f)
         assertEquals(1f,NexoraPolicy.breath(.9f,1.8f),.0001f)

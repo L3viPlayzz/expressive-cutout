@@ -26,6 +26,10 @@ internal object NexoraPolicy {
     // Monotone Hermite motion: retain useful incoming velocity on a retarget,
     // land at zero velocity, and never overshoot the allocated window.
     fun entrySlope(delta:Float,velocity:Float,durationMs:Long):Float = if(kotlin.math.abs(delta)<.01f)0f else if(kotlin.math.abs(velocity)<.001f) .85f else initialSlope(delta,velocity,durationMs)
+    fun pulse(time:Float,start:Float,end:Float):Float {
+        val q=((time-start)/(end-start).coerceAtLeast(.001f)).coerceIn(0f,1f)
+        return (16f*q*q*(1f-q)*(1f-q)).coerceIn(0f,1f)
+    }
     fun breath(age:Float,period:Float):Float = (.5f-.5f*kotlin.math.cos(2f*kotlin.math.PI.toFloat()*age/period.coerceAtLeast(.1f))).coerceIn(0f,1f)
     fun initialSlope(delta:Float,velocity:Float,durationMs:Long):Float =
         if(kotlin.math.abs(delta)<.01f)0f else (velocity*durationMs/delta).coerceIn(0f,2.8f)
