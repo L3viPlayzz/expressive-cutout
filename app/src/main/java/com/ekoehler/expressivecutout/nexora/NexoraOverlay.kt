@@ -43,10 +43,14 @@ class NexoraOverlay(private val service: AccessibilityService) {
     private var hub = false
     private var quickControls=readQuickControls()
     private var hubVolume=enabled("hub_volume")
+    private var cachedVolume=0f
+    private var lastVolumeStep=-1
     private fun readQuickControls()=(0..2).map{QuickControl.read(prefs.getString("hub_slot_$it",null),it)}.filter{it!=QuickControl.NONE}.distinct()
     private fun openHub(){
         if(ringing() || keyguard.isKeyguardLocked || !enabled("enabled"))return
         if(hub && current?.kind=="hub"){hub=false;expanded=false;selectedId=null;render();return}
+        if(!hubVolume && quickControls.isEmpty())return
+        cachedVolume=volumeFraction();lastVolumeStep=-1
         inboxOpen=false;hub=true;browsing=false;expanded=true;autoCollapseAt=0L;autoFocus="hub";render()
     }
     private fun runQuickControl(action:QuickControl){
@@ -221,8 +225,15 @@ class NexoraOverlay(private val service: AccessibilityService) {
     }
     private fun setVolume(f:Float) {
         val a=audio ?: return
-        runCatching{a.setStreamVolume(android.media.AudioManager.STREAM_MUSIC,(f.coerceIn(0f,1f)*a.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)).roundToInt(),0)}
-        panel?.invalidate()
+        runCatching{
+            val max=a.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+            val step=(f.coerceIn(0f,1f)*max).roundToInt()
+            if(step!=lastVolumeStep){
+                a.setStreamVolume(android.media.AudioManager.STREAM_MUSIC,step,0)
+                lastVolumeStep=step;cachedVolume=volumeFraction()
+                panel?.invalidate()
+            }
+        }
     }
     private var flashUntil = 0L
     private var autoCollapseAt = 0L
@@ -508,6 +519,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             return listOf(Card("inbox","Notifications","",VIOLET))
         }
         if(inboxOpen){inboxOpen=false;expanded=false}
+        if(hub && !hubVolume && quickControls.isEmpty()){hub=false;expanded=false}
         if(hub && !ringing())return listOf(Card("hub","Quick controls","",VIOLET))
         if(!focused() && enabled("notifications") && enabled("live_progress")) NotificationInboxBus.items.value.filter{it.packageName !in mutedApps && (it.progress!=null || it.progressIndeterminate) && it.key!=flash?.key}.take(5).forEach{
             result.add(Card("progress",if(enabled("message_text"))it.title.ifBlank{it.appName}else it.appName,it.appName,BLUE,key=it.key,progress=it.progress,appIcon=appIcon(it.packageName)))
@@ -734,7 +746,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
     }
     private fun swipe(delta: Int,fromNotch:Boolean=false) {
         if(ringing())return
-        if(inboxOpen){inboxPage=NexoraPolicy.inboxPage(inboxPage+delta,inboxRows.size);panel?.invalidate();return}
+        if(inboxOpen){val next=NexoraPolicy.inboxPage(inboxPage+delta,inboxRows.size);if(next!=inboxPage){inboxPage=next;panel?.pageTransition(delta)};return}
+        if(hub)return
         if(!fromNotch && !enabled("swipe_switch"))return
         autoCollapseAt=0L; autoFocus=null
         browsing = enabled("inbox")
@@ -840,6 +853,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
         private val waveHeights = floatArrayOf(8f,16f,23f,15f,7f)
         private val albumSource = Rect()
         private var began = SystemClock.uptimeMillis()
+        private var pageBegan=0L
+        private var pageDirection=1
+        fun pageTransition(direction:Int){pageDirection=direction;pageBegan=SystemClock.uptimeMillis();invalidate()}
         private var cachedAlbum:android.graphics.Bitmap?=null
         private var cachedPhoto:android.graphics.Bitmap?=null
         fun updateAssets(){cachedAlbum=if(preview)null else NowPlayingBus.state.value?.albumArt?.asAndroidBitmap();cachedPhoto=if(keyguard.isKeyguardLocked)null else OnCallBus.state.value?.photo?.asAndroidBitmap()}
@@ -1265,7 +1281,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             val l=dp(14f);val r=w-l
             text(canvas,"Quick controls",l,y+dp(20f),15f,Color.WHITE,r-l,true)
             if(hubVolume){
-                val volume=volumeFraction()
+                val volume=cachedVolume
                 val vl=dp(20f);val vr=w-vl;val by=y+dp(39f)
                 color(0xFF24262C.toInt());canvas.drawRoundRect(vl,by,vr,by+dp(8f),dp(4f),dp(4f),paint)
                 if(volume>0f){gradient(vl,by,vr-vl,dp(8f));canvas.drawRoundRect(vl,by,vl+(vr-vl)*volume,by+dp(8f),dp(4f),dp(4f),paint)}
@@ -1299,11 +1315,14 @@ class NexoraOverlay(private val service: AccessibilityService) {
             text(canvas,"Notifications",l,y+dp(18f),15f,Color.WHITE,w-dp(95f),true)
             val pages=NexoraPolicy.inboxPages(inboxRows.size)
             text(canvas,"${inboxPage+1}/$pages",r-dp(38f),y+dp(18f),11f,VIOLET,dp(38f),true)
+            val pageMotion=if(reducedMotion || pageBegan==0L)1f else NexoraPolicy.phase((SystemClock.uptimeMillis()-pageBegan)/1000f,0f,.18f)
+            if(pageMotion<1f)postInvalidateOnAnimation()
             for(row in 0..2){
                 val item=inboxRows.getOrNull(inboxPage*3+row) ?: break
                 val rowMotion=NexoraPolicy.phase(e,.26f+row*.05f,.85f+row*.04f)
                 if(rowMotion<=0f)continue
-                canvas.save();canvas.translate(0f,dp(5f)*(1f-rowMotion))
+                if(pageMotion<.999f)canvas.saveLayerAlpha(l,y+dp(23f),r,h,(255*pageMotion).toInt())else canvas.save()
+                canvas.translate(dp(8f)*pageDirection*(1f-pageMotion),dp(5f)*(1f-rowMotion))
                 val yy=y+dp(25f+row*37f)
                 val icon=appIcon(item.packageName)
                 val size=dp(23f)
@@ -1344,8 +1363,8 @@ class NexoraOverlay(private val service: AccessibilityService) {
             if(reveal<.999f)canvas.saveLayerAlpha(0f,0f,w,h,((1f-(1f-reveal)*(1f-reveal))*255).toInt()) else canvas.save()
             try {
             // Reference has a pure black silhouette without a visible outline.
-            if(card.kind=="inbox") {drawInbox(canvas,w,h,((h-topHeight)/dp(152f)).coerceIn(0f,1f));return}
-            if(card.kind=="hub"){drawQuickControls(canvas,w,h,((h-topHeight)/dp(if(hubVolume)118f else 100f)).coerceIn(0f,1f));return}
+            if(card.kind=="inbox") {drawInbox(canvas,w,h,((h-topHeight)/dp(152f)).coerceIn(0f,1f));if(!reducedMotion && age<.14f)postInvalidateOnAnimation();return}
+            if(card.kind=="hub"){drawQuickControls(canvas,w,h,((h-topHeight)/dp(if(hubVolume)118f else 100f)).coerceIn(0f,1f));if(!reducedMotion && age<.14f)postInvalidateOnAnimation();return}
             if(card.kind=="music") {
                 if(w>dp(105f)) musicLayout(canvas,w,h,expansion,age)
                 if(!reducedMotion && (age<1.3f || preview || NowPlayingBus.state.value?.isPlaying==true))postInvalidateOnAnimation()
