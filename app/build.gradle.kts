@@ -21,11 +21,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.nexora.island"
+        applicationId = "com.nexora.island.dev"
         minSdk = 29
         targetSdk = 36
         versionCode = 8
-        versionName = "1.0.0-beta"
+        versionName = "1.0.0-dev.1"
     }
 
 	signingConfigs {
