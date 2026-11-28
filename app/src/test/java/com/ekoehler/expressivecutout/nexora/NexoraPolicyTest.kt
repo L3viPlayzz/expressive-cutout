@@ -4,6 +4,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NexoraPolicyTest {
+    @Test fun notchDoubleTapRequiresTimingAndDistance(){
+        assertTrue(NexoraPolicy.isDoubleTap(180,300,8f,24f,true))
+        assertFalse(NexoraPolicy.isDoubleTap(301,300,8f,24f,true))
+        assertFalse(NexoraPolicy.isDoubleTap(180,300,25f,24f,true))
+        assertFalse(NexoraPolicy.isDoubleTap(180,300,8f,24f,false))
+        assertEquals(NotchAction.INBOX,NotchGesture.TAP.defaultAction)
+        assertEquals(NotchAction.NONE,NotchGesture.DOUBLE.defaultAction)
+        assertEquals(NotchAction.HUB,NotchAction.read("invalid",NotchAction.HUB))
+    }
     @Test fun inboxPagesNeverExposeEmptyPage() {
         assertEquals(0,NexoraPolicy.inboxPages(0))
         assertEquals(1,NexoraPolicy.inboxPages(3))
