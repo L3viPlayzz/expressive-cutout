@@ -4,6 +4,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NexoraPolicyTest {
+    @Test fun staticActivitiesDoNotPoll(){
+        assertNull(NexoraPolicy.refreshDelay(1000,null,false))
+        assertEquals(3000L,NexoraPolicy.refreshDelay(1000,4000,false)!!)
+        assertEquals(1000L,NexoraPolicy.refreshDelay(1000,4000,true)!!)
+        assertEquals(50L,NexoraPolicy.refreshDelay(1000,1050,true)!!)
+    }
     @Test fun batterySpeedUsesMeasuredNetPower(){
         assertEquals(12f,ChargeRate.watts(3_000_000,4000)!!,.001f)
         assertNull(ChargeRate.watts(Int.MIN_VALUE,4000))

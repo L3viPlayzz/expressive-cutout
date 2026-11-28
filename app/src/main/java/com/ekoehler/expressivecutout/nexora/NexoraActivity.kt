@@ -494,7 +494,7 @@ class NexoraActivity : Activity() {
             "about"->{
                 pageFrame("About NEXORA","Studio • Reborn")
                 add(label("Independent Canvas interface, powered by Android media sessions, notification access and accessibility. No network permission.",15f,muted))
-                add(label("GPL-3.0 • Modified from EvanKoe/expressive-cutout. No warranty. Source: github.com/L3viPlayzz/expressive-cutout/tree/nexora-reborn",13f,muted))
+                add(label("GPL-3.0 • Modified from EvanKoe/expressive-cutout. No warranty. Source: github.com/L3viPlayzz/expressive-cutout/tree/nexora-momentum",13f,muted))
                 button("Reset NEXORA preferences","Restore renderer settings; permissions are not removed"){
                     android.app.AlertDialog.Builder(this).setTitle("Reset NEXORA?").setMessage("This restores the new renderer settings.").setNegativeButton("Cancel",null).setPositiveButton("Reset"){_,_->prefs.edit().clear().apply();go("home")}.show()
                 }

@@ -35,11 +35,18 @@ jobs:
         if: github.ref_name == 'nexora-reborn' || github.ref_name == 'nexora-momentum'
         run: ./gradlew testDebugUnitTest --tests "com.ekoehler.expressivecutout.nexora.NexoraPolicyTest" --no-daemon
 
-      - name: Lint
-        continue-on-error: true
+      - name: Android lint (release gate)
         run: ./gradlew lintDebug --no-daemon
 
-      - name: Prepare NEXORA APK
+      - name: Publish lint diagnostics
+        if: always()
+        run: |
+          report=app/build/reports/lint-results-debug.xml
+          if [ -f "$report" ]; then
+            python3 -c 'import xml.etree.ElementTree as E; r=E.parse("app/build/reports/lint-results-debug.xml"); print("\n".join("{} {}: {} — {}".format(i.get("severity"),i.get("id"),i.find("location").get("file") if i.find("location") is not None else "",i.get("message")) for i in r.findall("issue")))'
+          fi
+
+      - name: Prepare NEXORA APK (only after release checks pass)
         run: cp app/build/outputs/apk/debug/app-debug.apk NEXORA.apk
 
       - name: Upload debug APK
@@ -54,5 +61,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lint-report
-          path: app/build/reports/lint-results-debug.html
+          path: |
+            app/build/reports/lint-results-debug.html
+            app/build/reports/lint-results-debug.xml
+            app/build/reports/lint-results-debug.txt
           if-no-files-found: ignore

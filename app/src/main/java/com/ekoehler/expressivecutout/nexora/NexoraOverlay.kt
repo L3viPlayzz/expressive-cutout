@@ -129,7 +129,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         render()
     }
     private fun closeInbox(){
-        inboxOpen=false;inboxPage=0;expanded=false;browsing=false;autoFocus=null;selectedId=null
+        inboxOpen=false;inboxRows=emptyList();inboxPage=0;expanded=false;browsing=false;autoFocus=null;selectedId=null
         render()
     }
     private fun removeNotch(){
@@ -454,7 +454,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         } }
         scope.launch { RunningTimerBus.state.collect { scheduleRender() } }
         scope.launch { DeviceLockBus.locked.collect { locked ->
-            if(locked){inboxOpen=false;cancelNotchGesture();removeNotch();hadLockedScreen=true;flash=null;pending.clear();browsing=false;expanded=false;autoCollapseAt=0L;autoFocus=null}
+            if(locked){inboxOpen=false;inboxRows=emptyList();cancelNotchGesture();removeNotch();hadLockedScreen=true;flash=null;pending.clear();browsing=false;expanded=false;autoCollapseAt=0L;autoFocus=null}
             else if(hadLockedScreen)confirmedUnlock()
             render()
         } }
@@ -476,6 +476,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
     }
     private fun show(card: Card) {
         if(!enabled("enabled") || !displayAwake())return
+        if(keyguard.isKeyguardLocked && card.kind in setOf("message","progress"))return
         // Incoming calls keep priority until answered or declined.
         val now=SystemClock.uptimeMillis()
         if(card.kind=="progress" && flash?.key!=card.key && NotificationInboxBus.items.value.any{it.key==card.key && (it.progress!=null || it.progressIndeterminate)} && current?.key==card.key){render();return}
@@ -504,7 +505,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         val result = mutableListOf<Card>()
         val locked = keyguard.isKeyguardLocked
         val preview = NexoraCalibration.mode.value
-        if (!locked && preview != 0) return listOf(
+        if (!locked && !ringing() && preview != 0) return listOf(
             if (preview == 3) Card("energy", "Charging", "84%", GREEN, progress=.84f)
             else Card("music", "Midnight Drive", "Now playing", VIOLET, progress = .60f)
         )
@@ -643,7 +644,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             val previous=selectedId?.let{id->all.indexOfFirst{it.identity()==id}} ?: -1
             if(previous>=0)selection=previous
         }
-        if(ringing() && NexoraCalibration.mode.value==0) {
+        if(ringing()) {
             val callIndex=all.indexOfFirst{it.kind=="call"}
             if(callIndex>=0){selection=callIndex; expanded=true; autoCollapseAt=0L; autoFocus=null; browsing=false}
         }
@@ -663,17 +664,19 @@ class NexoraOverlay(private val service: AccessibilityService) {
         val cutout = CutoutMetrics.displayCutoutBoundsPx(service)?.takeIf {
             it.centerY() < dp(64f) && it.centerX() >= screenWidth/4f && it.centerX() <= screenWidth*3/4f
         }
-        val cameraX = cutout?.centerX()?.roundToInt() ?: screenWidth / 2
-        val preview = NexoraCalibration.mode.value.takeUnless { keyguard.isKeyguardLocked } ?: 0
+        // Unsupported camera geometry must not produce an arbitrary pill over an app.
+        if(cutout==null){removeNotch();remove();return}
+        val cameraX = cutout.centerX().roundToInt()
+        val preview = NexoraCalibration.mode.value.takeUnless { keyguard.isKeyguardLocked || ringing() } ?: 0
         val isExpanded = if (preview != 0) preview == 2 else expanded && !(next.kind=="lock" && keyguard.isKeyguardLocked)
         if(preview!=0 || keyguard.isKeyguardLocked)CutoutWidthBus.update(null,false,false)
         else if(isExpanded)CutoutWidthBus.update(CutoutKind.EXPANDED,false,false)
-        else if(panel==null || panel?.open==false && geometry?.isRunning!=true)CutoutWidthBus.update(CutoutKind.NORMAL,false,false)
+        else if(params==null || panel?.open==false && geometry?.isRunning!=true)CutoutWidthBus.update(CutoutKind.NORMAL,false,false)
         val scale = prefs.getInt("island_width",100).coerceIn(85,120)/100f
         val requestedHeight = prefs.getInt("island_height_v2",28).coerceIn(20,44)
-        val cameraRadius = max(dp(6f), (cutout?.width() ?: 0f) / 2f + dp(1.5f))
-        physicalY = cutout?.centerY() ?: dp(17f)
-        val cameraHalfHeight = (cutout?.height()?.div(2f) ?: dp(6f)) + dp(1.5f)
+        val cameraRadius = max(dp(6f), cutout.width() / 2f + dp(1.5f))
+        physicalY = cutout.centerY()
+        val cameraHalfHeight = cutout.height()/2f + dp(1.5f)
         val topHeight = NexoraPolicy.safeHeight(dp(requestedHeight.toFloat()).roundToInt(),ceil(cameraHalfHeight*2).toInt())
         val minY=ceil(physicalY+cameraHalfHeight-topHeight).toInt().coerceAtLeast(0)
         val maxY=floor(physicalY-cameraHalfHeight).toInt().coerceAtLeast(minY)
@@ -688,6 +691,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         screenWidthPx = screenWidth
         val x = (anchorX - width / 2).coerceIn(0, (screenWidth-width).coerceAtLeast(0))
         v.cameraRadius = cameraRadius
+        v.cameraHalfHeight=cameraHalfHeight
         v.topHeight = topHeight.toFloat()
         v.preview = preview != 0
         val rateChanged=!changed && next.kind=="energy" && v.card.chargeRate!=next.chargeRate && next.chargeRate!=ChargeRate.UNKNOWN
@@ -731,7 +735,10 @@ class NexoraOverlay(private val service: AccessibilityService) {
         if (preview != 0 || inboxOpen) return
         val now=SystemClock.uptimeMillis()
         val nextDeadline=listOf(autoCollapseAt,if(flash!=null)flashUntil else 0L).filter{it>now}.minOrNull()
-        handler.postDelayed(refresh, min(1000L,(nextDeadline?.minus(now) ?: 1000L).coerceAtLeast(1L)))
+        // Static music/charging/connection cards do not need a full render every second.
+        // Only a ticking timer or active call needs periodic text updates.
+        val tick=next.kind=="timer" || (next.kind=="call" && OnCallBus.state.value?.ongoing==true)
+        NexoraPolicy.refreshDelay(now,nextDeadline,tick)?.let{handler.postDelayed(refresh,it)}
     }
     private fun hide() {
         val v = panel ?: return
@@ -763,10 +770,11 @@ class NexoraOverlay(private val service: AccessibilityService) {
         if(ringing())return
         if(inboxOpen){val next=NexoraPolicy.inboxPage(inboxPage+delta,inboxRows.size);if(next!=inboxPage){inboxPage=next;panel?.pageTransition(delta)};return}
         if(!fromNotch && !enabled("swipe_switch"))return
-        autoCollapseAt=0L; autoFocus=null
+        val previousBrowsing=browsing
         browsing = enabled("inbox")
         val all = cards()
-        if(all.size<=1){browsing=false;return}
+        if(all.size<=1){browsing=previousBrowsing;return}
+        autoCollapseAt=0L; autoFocus=null
         val idx=selectedId?.let{id->all.indexOfFirst{it.identity()==id}}?.takeIf{it>=0} ?: selection.coerceIn(0,all.lastIndex)
         selection=(idx+delta+all.size)%all.size
         selectedId=all[selection].identity()
@@ -873,7 +881,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         private var notchRoute=false
         private var maxTravel=0f
         private var downTime = 0L
-        var cameraX = 0f; var cameraY = 0f; var cameraRadius = 0f; var topHeight = 0f
+        var cameraX = 0f; var cameraY = 0f; var cameraRadius = 0f; var cameraHalfHeight=0f; var topHeight = 0f
         var visualX=0f; var visualY=0f; var visualWidth=0f; var visualHeight=0f
         var drawX=0f; var drawY=0f
         var card = Card("system", "")
@@ -1329,7 +1337,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             silhouette.reset(); silhouette.addRoundRect(rect,radius,radius,Path.Direction.CW)
             canvas.clipPath(silhouette)
             // Reserve the physical camera area even while an icon travels between sizes.
-            cameraMask.reset();cameraMask.addCircle(cameraX,cameraY,cameraRadius,Path.Direction.CW)
+            cameraMask.reset();cameraMask.addOval(cameraX-cameraRadius,cameraY-cameraHalfHeight,cameraX+cameraRadius,cameraY+cameraHalfHeight,Path.Direction.CW)
             canvas.clipOutPath(cameraMask)
             val reveal=if(reducedMotion)1f else NexoraPolicy.phase(age,0f,.11f)
             if(reveal<.999f)canvas.saveLayerAlpha(0f,0f,w,h,((1f-(1f-reveal)*(1f-reveal))*255).toInt()) else canvas.save()

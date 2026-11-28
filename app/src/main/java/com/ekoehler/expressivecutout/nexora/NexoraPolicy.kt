@@ -3,6 +3,10 @@ package com.ekoehler.expressivecutout.nexora
 /** Pure, testable rules used by the renderer and calibration screen. */
 internal object NexoraPolicy {
     fun isDoubleTap(elapsed:Long,timeout:Long,distance:Float,slop:Float,pending:Boolean):Boolean = pending && elapsed in 0L..timeout && distance<=slop
+    fun refreshDelay(now:Long,deadline:Long?,ticking:Boolean):Long? {
+        val remaining=deadline?.let{(it-now).coerceAtLeast(1L)}
+        return if(ticking)minOf(1000L,remaining ?: 1000L)else remaining
+    }
     fun inboxPages(count:Int):Int = if(count<=0)0 else (count-1)/3+1
     fun inboxPage(requested:Int,count:Int):Int = requested.coerceIn(0,(inboxPages(count)-1).coerceAtLeast(0))
     fun canDraw(interactive:Boolean, displayOn:Boolean):Boolean = interactive && displayOn

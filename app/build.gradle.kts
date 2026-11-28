@@ -24,8 +24,8 @@ android {
         applicationId = "com.nexora.island"
         minSdk = 29
         targetSdk = 35
-        versionCode = 10
-        versionName = "1.2.0-studio-beta"
+        versionCode = 11
+        versionName = "1.3.0-rc1"
     }
 
 	signingConfigs {
