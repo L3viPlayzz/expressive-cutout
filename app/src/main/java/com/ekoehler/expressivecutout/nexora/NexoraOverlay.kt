@@ -436,11 +436,12 @@ class NexoraOverlay(private val service: AccessibilityService) {
         if(keyguard.isKeyguardLocked && card.kind in setOf("message","progress"))return
         // Incoming calls keep priority until answered or declined.
         val now=SystemClock.uptimeMillis()
+        if(card.eventType=="CHARGING_STARTED" && flash?.eventType=="CHARGING_STARTED"){flash=card;scheduleRender();return}
         if(card.kind=="progress" && flash?.key!=card.key && NotificationInboxBus.items.value.any{it.key==card.key && (it.progress!=null || it.progressIndeterminate)} && current?.key==card.key){render();return}
         if(card.kind=="progress" && card.key!=null && card.key==flash?.key){
             flash=card; render(); return
         }
-        if(ringing() || inboxOpen || (enabled("queue_events",false) && flash!=null && now<autoCollapseAt && (card.key==null || card.key!=flash?.key))){
+        if(ringing() || inboxOpen || (flash?.kind=="energy" && card.kind!="energy" && now<flashUntil) || (enabled("queue_events",false) && flash!=null && now<autoCollapseAt && (card.key==null || card.key!=flash?.key))){
             if(card.key!=null)pending.removeAll{it.second.key==card.key}
             if(pending.size>=8)pending.removeFirst()
             pending.addLast(now to card)
@@ -545,7 +546,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         place(v,fromX,fromY,fromW,fromH)
         val startAlpha=v.alpha
         geometry=ValueAnimator.ofFloat(0f,1f).apply {
-            val base=if(dismiss)205L else if(h>fromH+dp(10f))325L else if(h<fromH-dp(10f))270L else 235L
+            val base=if(dismiss)205L else if(h>fromH+dp(10f))325L else if(h<fromH-dp(10f))340L else 235L
             duration=NexoraPolicy.motionMillis(base,100,reducedMotion)
             interpolator=android.view.animation.LinearInterpolator()
             val dx=x-fromX; val dy=y-fromY;val dw=w-fromW;val dh=h-fromH
@@ -560,7 +561,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 // during collapse. Independent velocities previously caused lateral drift.
                 val horizontal=if(abs(dw)>.01f)sw else sx
                 val closing=dismiss || h<fromH-dp(10f)
-                val px=if(closing)NexoraPolicy.smoothstep(t)else NexoraPolicy.motionPosition(t,horizontal)
+                val px=if(closing)NexoraPolicy.motionPosition(t,0f)else NexoraPolicy.motionPosition(t,horizontal)
                 val py=if(closing)px else NexoraPolicy.motionPosition(t,sy)
                 val ph=if(closing)px else NexoraPolicy.motionPosition(t,sh)
                 vx=dx*NexoraPolicy.motionVelocity(t,horizontal)/ms;vy=dy*NexoraPolicy.motionVelocity(t,sy)/ms
@@ -761,18 +762,18 @@ class NexoraOverlay(private val service: AccessibilityService) {
     }
     private fun tap(x: Float, y: Float) {
         val c = current ?: return
-        autoCollapseAt=0L; autoFocus=null
+        if(c.kind!="energy"){autoCollapseAt=0L; autoFocus=null}
         if(c.kind=="inbox"){
             val top=panel?.topHeight ?: return
             if(y<top){closeInbox();return}
             val position=y-top-dp(32f)+inboxScroll
             val row=(position/dp(60f)).toInt()
-            if(y>=top+dp(32f) && y<top+dp(212f) && x>=dp(14f) && x<=(panel?.visualWidth ?: 0f)-dp(14f) && position>=0f && position%dp(60f)<dp(54f))inboxRows.getOrNull(row)?.let{if(CutoutNotificationListenerService.openFromInbox(it.key))closeInbox() else android.widget.Toast.makeText(service,"Unable to open notification",android.widget.Toast.LENGTH_SHORT).show()}
+            if(y>=top+dp(32f) && y<top+dp(212f) && x>=dp(14f) && x<=(panel?.visualWidth ?: 0f)-dp(14f) && position>=0f)inboxRows.getOrNull(row)?.let{if(CutoutNotificationListenerService.openFromInbox(it.key,service,it.packageName))closeInbox() else android.widget.Toast.makeText(service,"Unable to open notification",android.widget.Toast.LENGTH_SHORT).show()}
             return
         }
         if(signatureOnly(c)){flash=null;flashUntil=0L;expanded=false;selectedId=null;render();return}
         if (!expanded) { expanded = true; render(); return }
-        if (y < (panel?.topHeight ?: 0f)) { if(!ringing()){expanded = false;  render()}; return }
+        if (y < (panel?.topHeight ?: 0f)) { if(!ringing()){expanded = false;if(c.kind=="energy"){autoCollapseAt=0L;flashUntil=SystemClock.uptimeMillis()+compactMs()};render()}; return }
         if (keyguard.isKeyguardLocked) return
         if (c.kind == "music" && y > (panel?.topHeight ?: 0f) + dp(58f)) {
             NowPlayingBus.state.value?.transport?.let {
@@ -798,9 +799,12 @@ class NexoraOverlay(private val service: AccessibilityService) {
             val w=panel?.visualWidth ?: return
             val left=dp(14f); val gap=dp(8f);val bw=(w-2*left-gap*(c.actions.size-1))/c.actions.size
             c.actions.forEachIndexed{i,action->if(x>=left+i*(bw+gap) && x<=left+i*(bw+gap)+bw)runCatching{action.intent.send()}}
+        } else if (c.key != null && c.kind in setOf("message","progress")) {
+            if(CutoutNotificationListenerService.openFromInbox(c.key,service,c.packageName)){flash=null;flashUntil=0L;expanded=false;selectedId=null;render()}
+            else android.widget.Toast.makeText(service,"Unable to open notification",android.widget.Toast.LENGTH_SHORT).show()
         } else if (c.intent != null) runCatching { c.intent.send() }
         else if(c.settingsAction!=null)runCatching{service.startActivity(android.content.Intent(c.settingsAction).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))}
-        else if (c.key != null) CutoutNotificationListenerService.openFromInbox(c.key)
+        else if (c.key != null) CutoutNotificationListenerService.openFromInbox(c.key,service,c.packageName)
         else { expanded = false; render() }
     }
     private class TextEntry(var value:String="",var width:Int=-1,var size:Float=0f,var bold:Boolean=false,var result:String="")
@@ -1010,7 +1014,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         private fun signatureLayout(canvas:Canvas,w:Float,h:Float,e:Float,rawAge:Float){
             val reduced=reducedMotion
             val age=if(reduced)2f else rawAge
-            val t=NexoraPolicy.phase(e,.03f,.92f)
+            val t=NexoraPolicy.smoothstep(e)
             val compactRoom=(cameraX-cameraRadius-dp(6f)).coerceAtLeast(0f)
             val compactX=compactRoom*.50f+dp(3f)
             val compactSize=NexoraPolicy.glyphSize(dp(21f),compactRoom-dp(2f),2f*min(cameraY,topHeight-cameraY)-dp(4f))
@@ -1131,7 +1135,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                     canvas.drawPath(currentSegment,paint);paint.style=Paint.Style.FILL
                 }
             }
-            val labelFade=(1f-NexoraPolicy.phase(e,.12f,.58f))*visibility
+            val labelFade=(1f-NexoraPolicy.phase(e,.08f,.48f))*visibility
             val right=cameraX+cameraRadius+dp(5f)
             val rightWidth=(w-right-dp(7f)).coerceAtLeast(0f)
             val compactLabel=if(isEnergy)card.badge ?: card.progress?.let{"${(it*100).roundToInt()}%"} ?: "Power" else if(unlocked)"Unlocked" else "Locked"

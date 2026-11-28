@@ -117,7 +117,7 @@ class CutoutNotificationListenerService : NotificationListenerService() {
      * Mirror of BehaviourSettings.dismissNotifications, cached because onNotificationPosted runs on
      * the main thread and must not wait on a DataStore read. Main-thread only, like the key fields.
      */
-    private var dismissNotifications = BehaviourSettings.DEFAULT_DISMISS_NOTIFICATIONS
+    private var dismissNotifications = false
 
     /**
      * Mirror of BehaviourSettings.displayWhileDnd, cached alongside [dismissNotifications] and for
@@ -129,7 +129,7 @@ class CutoutNotificationListenerService : NotificationListenerService() {
      * Mirror of BehaviourSettings.alertOnNotification, cached alongside [dismissNotifications] and
      * for the same reason. Main-thread only, like the key fields.
      */
-    private var alertOnNotification = BehaviourSettings.DEFAULT_ALERT_ON_NOTIFICATION
+    private var alertOnNotification = false
 
     /**
      * Keys currently held out of the shade because the island is showing them, mapped to the
@@ -251,9 +251,9 @@ class CutoutNotificationListenerService : NotificationListenerService() {
             behaviourPreferences.settings
                 .distinctUntilChanged()
                 .collect { settings ->
-                    dismissNotifications = settings.dismissNotifications
+                    dismissNotifications = false
                     displayWhileDnd = settings.displayWhileDnd
-                    alertOnNotification = settings.alertOnNotification
+                    alertOnNotification = false
                 }
         }
     }
@@ -1110,24 +1110,23 @@ class CutoutNotificationListenerService : NotificationListenerService() {
         }
 
         /** Opens a notification explicitly selected in the inbox without reading its message body. */
-        fun openFromInbox(key: String): Boolean {
-            val listener = instance ?: return false
-            val item = runCatching { listener.getActiveNotifications(arrayOf(key)).firstOrNull() }
+        fun openFromInbox(key: String, launchContext: Context? = null, fallbackPackage: String? = null): Boolean {
+            val listener = instance
+            val item = runCatching { listener?.getActiveNotifications(arrayOf(key))?.firstOrNull() }
                 .onFailure { Log.w(TAG, "Cannot find inbox notification", it) }
-                .getOrNull() ?: return false
-            val intent = item.notification.contentIntent
-            if(intent!=null && runCatching { intent.send() }
-                .onSuccess {
-                    if (item.notification.flags and Notification.FLAG_AUTO_CANCEL != 0) {
-                        runCatching { listener.cancelNotification(key) }
-                            .onFailure { Log.w(TAG, "Cannot auto-clear opened notification", it) }
-                    }
-                }
-                .onFailure { Log.w(TAG, "Cannot open inbox notification", it) }.isSuccess)return true
+                .getOrNull()
+            val context = launchContext ?: listener ?: return false
+            val intent = item?.notification?.contentIntent
+            if(intent!=null && runCatching {
+                val options=android.app.ActivityOptions.makeBasic()
+                if(android.os.Build.VERSION.SDK_INT>=34)options.setPendingIntentBackgroundActivityStartMode(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+                intent.send(context,0,null,null,null,null,options.toBundle())
+            }.onFailure { Log.w(TAG, "Cannot open inbox notification", it) }.isSuccess)return true
             // Explicit user tap: fall back to the originating app launcher if no deep link works.
             return runCatching {
-                val launch=listener.packageManager.getLaunchIntentForPackage(item.packageName) ?: return false
-                listener.startActivity(launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                val pkg=item?.packageName ?: fallbackPackage ?: return false
+                val launch=context.packageManager.getLaunchIntentForPackage(pkg) ?: return false
+                context.startActivity(launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
                 true
             }.getOrDefault(false)
         }
