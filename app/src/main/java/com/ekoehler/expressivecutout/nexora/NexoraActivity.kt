@@ -257,7 +257,7 @@ class NexoraActivity : Activity() {
     private fun drawPage(){
         when(page){
             "home" -> {
-                pageFrame("N E X O R A","STUDIO  /  1.2")
+                pageFrame("NEXORA","BEYOND THE ISLAND")
                 val status=LinearLayout(this).apply{
                     orientation=LinearLayout.VERTICAL
                     background=GradientDrawable(GradientDrawable.Orientation.TL_BR,intArrayOf(0xFF152438.toInt(),0xFF201A35.toInt())).apply{cornerRadius=dp(25).toFloat()}
@@ -273,11 +273,12 @@ class NexoraActivity : Activity() {
                 toggle("Focus mode","Pause non-call activities without dismissing Android notifications","focus_mode",false)
                 heading("PERSONALIZE")
                 button("Appearance","Size, position and live preview"){go("appearance")}
-                button("Motion","Timing, speed, haptics and motion lab"){go("motion")}
+                button("Motion","Motion Lab and accessibility"){go("motion")}
                 button("Live activities","Music, timers, charging and connections"){go("activities")}
                 button("Notifications","Privacy, queue and inbox"){go("notifications")}
-                button("Gestures & controls","Swipe, long press and Quick Controls"){go("gestures")}
-                button("Notch Touch","Personal camera gestures and shortcuts"){go("notch")}
+                button("Notch Touch","Camera gestures and sensitivity"){go("notch")}
+                button("Quick Controls","Personalize your three shortcuts and volume"){go("quick")}
+                button("Gestures","Island touch preferences"){go("gestures")}
                 heading("SYSTEM")
                 button("Setup & Shizuku","Permissions in one place"){go("access")}
                 button("Status bar","Optional Shizuku status bar controls"){go("statusbar")}
@@ -298,9 +299,7 @@ class NexoraActivity : Activity() {
             }
             "motion"->{
                 pageFrame("Motion","Beyond the Island • Momentum motion, camera-safe shared elements and signature effects.")
-                choice("Animation tempo","motion_speed",listOf("Fast" to 75,"Fluid" to 100,"Gentle" to 130),100)
-                adjustment("Expanded duration","expand_seconds",1,8,3," s")
-                adjustment("Compact event duration","compact_seconds",0,10,3," s")
+                add(label("Native motion • 3 seconds expanded, 3 seconds compact. Incoming calls stay open.",14f,muted),14)
                 toggle("Haptic touch","Subtle system feedback on island touches","haptics")
                 toggle("Reduced motion","Short transitions and static waveform","reduce_motion",false)
                 heading("MOTION LAB")
@@ -408,13 +407,39 @@ class NexoraActivity : Activity() {
                     }
                 }
                 heading("TOUCH AREA")
-                adjustment("Extra touch padding","notch_padding",0,12,4," dp")
-                adjustment("Swipe distance","notch_swipe_distance",18,56,32," dp")
+                adjustment("Extra touch padding","notch_padding",0,12,6," dp")
+                adjustment("Swipe distance","notch_swipe_distance",18,56,28," dp")
                 add(label("Double tap is off by default for instant single taps. If enabled, a single tap waits briefly for the second tap. Incoming calls, AOD and the lock screen take priority.",13f,muted))
                 button("Reset camera gestures","Restore default actions and sensitivity"){
                     val edit=prefs.edit();NotchGesture.entries.forEach{edit.remove(it.key)}
                     edit.remove("notch_padding").remove("notch_swipe_distance").apply();drawPage()
                 }
+            }
+            "quick"->{
+                pageFrame("Quick Controls","Your shortcuts. Always one long press away.")
+                toggle("Media volume","Show the adjustable volume slider","hub_volume")
+                heading("SHORTCUTS")
+                for(slot in 0..2){
+                    val current=QuickControl.read(prefs.getString("hub_slot_$slot",null),slot)
+                    button("Shortcut ${slot+1}",current.label){
+                        val values=QuickControl.entries
+                        android.app.AlertDialog.Builder(this).setTitle("Shortcut ${slot+1}")
+                            .setSingleChoiceItems(values.map{it.label}.toTypedArray(),values.indexOf(current)){dialog,which->
+                                val chosen=values[which]
+                                val edit=prefs.edit().putString("hub_slot_$slot",chosen.name)
+                                if(chosen!=QuickControl.NONE)for(other in 0..2){
+                                    if(other!=slot && QuickControl.read(prefs.getString("hub_slot_$other",null),other)==chosen)edit.putString("hub_slot_$other",QuickControl.NONE.name)
+                                }
+                                edit.apply();dialog.dismiss();drawPage()
+                            }.setNegativeButton("Cancel",null).show()
+                    }
+                }
+                button("Preview Quick Controls","Open the actual Island"){requestIsland("hub")}
+                button("Reset layout","Quick settings • play/pause • inbox"){
+                    val edit=prefs.edit().remove("hub_volume");for(slot in 0..2)edit.remove("hub_slot_$slot")
+                    edit.apply();drawPage()
+                }
+                add(label("Controls use Android or media-session actions. Music shortcuts need an active player.",13f,muted))
             }
             "gestures"->{
                 pageFrame("Gestures & controls","Stay in control without opening another app.")
@@ -422,8 +447,7 @@ class NexoraActivity : Activity() {
                 toggle("Swipe horizontally","Switch between live activities","swipe_switch")
                 toggle("Swipe up","Dismiss the temporary island view","swipe_close")
                 toggle("Swipe down","Open Android notifications from the compact island","swipe_shade")
-                toggle("Hold for Quick Controls","Long press opens volume and shortcuts instead of inbox","hold_hub",false)
-                button("Open Quick Controls","Media volume • Android quick settings • inbox"){requestIsland("hub")}
+                button("Quick Controls","Edit shortcuts and preview your controls"){go("quick")}
                 heading("TOUCH")
                 add(label("Tap the camera opening for the notification inbox. Swipe between pages; tap a message to open it. Tap outside the camera area to expand a live activity. Incoming calls override navigation gestures until answered or declined.",14f,muted))
             }
