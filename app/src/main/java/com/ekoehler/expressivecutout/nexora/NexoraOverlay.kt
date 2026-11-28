@@ -520,7 +520,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         while(pending.isNotEmpty() && now-pending.peekFirst()!!.first>30000L)pending.removeFirst()
         if(!locked && !ringing() && !browsing && !inboxOpen && flash==null && pending.isNotEmpty()) activate(pending.removeFirst().second,now)
         flash?.takeIf { !locked || (it.kind != "message" && it.kind != "progress") }?.let {
-            if(it.kind in setOf("message","progress") && !enabled("message_text")) result.add(it.copy(title=it.packageName?.let{pkg->runCatching{service.packageManager.getApplicationLabel(service.packageManager.getApplicationInfo(pkg,0)).toString()}.getOrNull()} ?: "Notification",detail="",actions=emptyList())) else result.add(chargingCard(it))
+            if(it.kind in setOf("message","progress") && !enabled("message_text")) result.add(it.copy(title=it.packageName?.let{pkg->runCatching{service.packageManager.getApplicationLabel(service.packageManager.getApplicationInfo(pkg,0)).toString()}.getOrNull()} ?: "Notification",detail="",actions=emptyList())) else if(locked && it.kind=="connect")result.add(it.copy(detail="",badge=null)) else result.add(chargingCard(it))
         }
         if (locked) {
             if(enabled("lock_wake") && enabled("events") && enabled("event_unlock") && keyguard.isDeviceLocked && result.none{it.kind=="lock" || it.kind=="unlock"} && !ringing())result.add(Card("lock","Locked","Unlock your device",VIOLET))
@@ -690,7 +690,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
         v.cameraRadius = cameraRadius
         v.topHeight = topHeight.toFloat()
         v.preview = preview != 0
+        val rateChanged=!changed && next.kind=="energy" && v.card.chargeRate!=next.chargeRate && next.chargeRate!=ChargeRate.UNKNOWN
         v.card = next
+        if(rateChanged)v.rateConfirmed()
         v.updateAssets()
         v.count = all.size
         v.index = selection
@@ -855,6 +857,9 @@ class NexoraOverlay(private val service: AccessibilityService) {
         private val waveHeights = floatArrayOf(8f,16f,23f,15f,7f)
         private val albumSource = Rect()
         private var began = SystemClock.uptimeMillis()
+        private var rateAt=0L
+        fun rateConfirmed(){rateAt=SystemClock.uptimeMillis();invalidate()}
+        private fun rateAge()=if(rateAt==0L)10f else (SystemClock.uptimeMillis()-rateAt)/1000f
         private var pageBegan=0L
         private var pageDirection=1
         fun pageTransition(direction:Int){pageDirection=direction;pageBegan=SystemClock.uptimeMillis();invalidate()}
@@ -876,6 +881,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
         init { isClickable = true; contentDescription = "NEXORA live activity" }
         fun enter() {
             began = SystemClock.uptimeMillis()
+            rateAt=0L
             invalidate()
         }
         private fun color(c: Int, a: Int = 255) { paint.color = c; paint.alpha = a; paint.style = Paint.Style.FILL; paint.shader = null }
@@ -1064,6 +1070,13 @@ class NexoraOverlay(private val service: AccessibilityService) {
                             canvas.drawArc(-21f,-21f,21f,21f,-90f+360f*amount-sweep,sweep,false,paint)
                         }
                     }
+                    val confirmAge=rateAge()
+                    if(!reduced && confirmAge<.8f){
+                        val pulse=NexoraPolicy.pulse(confirmAge,0f,.8f)
+                        val r=14f+7f*NexoraPolicy.phase(confirmAge,0f,.8f)
+                        color(tone,(170*pulse).toInt());paint.style=Paint.Style.STROKE;paint.strokeWidth=1.6f
+                        canvas.drawCircle(0f,0f,r,paint)
+                    }
                     val bolt=NexoraPolicy.phase(age,.06f,.48f)
                     effectPath.reset();effectPath.moveTo(3f,-14f);effectPath.lineTo(-9f,1f);effectPath.lineTo(-1f,1f);effectPath.lineTo(-4f,14f);effectPath.lineTo(10f,-3f);effectPath.lineTo(2f,-3f);effectPath.close()
                     color(tone);paint.style=Paint.Style.STROKE;paint.strokeWidth=1.9f;paint.strokeJoin=Paint.Join.ROUND
@@ -1131,7 +1144,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
                 if(labelFade<.999f)canvas.saveLayerAlpha(0f,0f,w,h,(labelFade*255).toInt()) else canvas.save()
                 val textSize=min(if(isEnergy)14f else 10.5f,(topHeight/density-6f).coerceAtLeast(8f))
                 val speed=if(isEnergy)card.chargeRate.badge else ""
-                val twoLines=speed.isNotBlank() && topHeight>=dp(26f)
+                val twoLines=speed.isNotBlank() && cameraY>=dp(12f) && topHeight-cameraY>=dp(12f)
                 text(canvas,compactLabel,right,cameraY+dp(if(twoLines)1f else textSize*.35f),if(twoLines)12f else textSize,tone,rightWidth,true)
                 if(twoLines)text(canvas,speed,right,cameraY+dp(10f),8f,tone,rightWidth)
                 canvas.restore()
@@ -1330,7 +1343,7 @@ class NexoraOverlay(private val service: AccessibilityService) {
             }
             if(card.kind=="energy" || card.kind=="unlock" || card.kind=="lock") {
                 signatureLayout(canvas,w,h,expansion,age)
-                if(age<1.3f && !reducedMotion)postInvalidateOnAnimation()
+                if((age<1.3f || (card.kind=="energy" && rateAge()<.8f)) && !reducedMotion)postInvalidateOnAnimation()
                 return
             }
             if (w < dp(82f)) { if(age<1.3f && !reducedMotion) postInvalidateOnAnimation(); return }
